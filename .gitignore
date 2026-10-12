@@ -1,0 +1,26 @@
+# 追踪白名单：来源于追踪清单.txt
+# 默认忽略文件，允许遍历目录以匹配下方白名单
+*
+!*/
+
+# 需要追踪的文件和路径
+!/.gitignore
+!/AGENTS.md
+!/launch_viewer.ps1
+!/LICENSE
+!/paper_server.py
+!/paper_viewer.html
+!/start_viewer.bat
+!/vendor/**
+!/viewer/**
+!/utils/**
+
+# 明确排除的资料与本地配置（优先于上方白名单）
+*.[pP][dD][fF]
+/methods/
+/paper_index.json
+__pycache__/
+*.py[cod]
+.env
+.env.*
+/追踪清单.txt

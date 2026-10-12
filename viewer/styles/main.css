@@ -1,0 +1,73 @@
+:root { --ink:#202820; --muted:#657064; --line:#e3e7df; --paper:#fbfcf8; --green:#315b43; --pale:#edf3eb; --gold:#d8a64c; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.65 "Segoe UI","Microsoft YaHei",sans-serif; }
+.top { background:#e8efe5; border-bottom:1px solid #d9e2d5; }
+header { max-width:1160px; margin:auto; padding:36px 24px 27px; }
+.eyebrow { color:var(--green); font-size:12px; font-weight:700; letter-spacing:.13em; }
+h1 { margin:5px 0 4px; font:600 clamp(27px,4vw,38px)/1.25 Georgia,"Microsoft YaHei",serif; letter-spacing:-.03em; }
+.subtitle { color:var(--muted); margin:8px 0 0; }
+main { max-width:1160px; padding:25px 24px 56px; margin:auto; }
+.toolbar { display:grid; grid-template-columns:minmax(220px,1fr) minmax(210px,300px) auto; gap:12px; align-items:center; margin-bottom:15px; }
+.date-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-bottom:15px; }
+.date-filter-panel { margin-bottom:15px; }
+.date-filter-panel summary { cursor:pointer; color:var(--green); font-size:13px; font-weight:600; width:fit-content; }
+.date-filter-panel summary:focus-visible { outline:2px solid #b7cdb9; outline-offset:4px; border-radius:3px; }
+.date-filter-panel .date-filters { margin:12px 0 0; }
+.date-filters label { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+.date-filters input { height:40px; padding:0 10px; border:1px solid var(--line); border-radius:8px; background:white; color:var(--ink); }
+.date-filters input:focus { outline:2px solid #b7cdb9; border-color:var(--green); }
+.date-hint { font-size:12px; color:var(--muted); }
+.action { border:1px solid var(--line); border-radius:9px; padding:9px 15px; background:var(--green); color:white; cursor:pointer; }
+.action:disabled { opacity:.6; cursor:wait; }
+.search-dialog { width:min(580px,calc(100% - 28px)); padding:24px; }
+.search-dialog h2 { margin:0 0 12px; font-size:21px; }
+.search-dialog label { display:block; margin:12px 0 5px; }
+.search-dialog textarea { width:100%; min-height:110px; padding:10px; border:1px solid var(--line); border-radius:8px; font:inherit; resize:vertical; }
+.search-dialog input[type=number] { width:90px; padding:6px; border:1px solid var(--line); border-radius:6px; }
+.search-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
+#clear-semantic { margin-bottom:12px; }
+input,select,button { font:inherit; }
+input[type=search],select,.file-label { height:45px; border:1px solid var(--line); border-radius:9px; background:white; color:var(--ink); padding:0 13px; }
+input[type=search]:focus,select:focus { outline:2px solid #b7cdb9; border-color:var(--green); }
+.file-label { display:inline-flex; align-items:center; justify-content:center; padding:0 15px; cursor:pointer; color:var(--green); font-weight:600; white-space:nowrap; }
+.file-label:hover { background:var(--pale); }
+.status { color:var(--muted); font-size:13px; margin:8px 0 17px; min-height:22px; }
+.status.error { color:#9a3d35; }
+.group { margin:23px 0 10px; color:var(--green); font-size:13px; letter-spacing:.04em; font-weight:700; }
+.grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px; }
+.card { background:white; border:1px solid var(--line); border-radius:12px; padding:17px 18px 15px; cursor:pointer; transition:transform .15s,border-color .15s,box-shadow .15s; }
+.card:hover { transform:translateY(-2px); border-color:#afc4ae; box-shadow:0 7px 22px #25452c0c; }
+.card h2 { font:600 17px/1.42 Georgia,"Microsoft YaHei",serif; margin:8px 0 8px; }
+.type { color:var(--muted); font-size:12px; }
+.desc { color:#4f5b50; font-size:13px; margin:0; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.tag { border-radius:99px; padding:2px 9px; background:var(--pale); color:#47634d; font-size:11px; }
+.empty { grid-column:1/-1; border:1px dashed #cdd6ca; padding:36px; text-align:center; border-radius:12px; color:var(--muted); }
+dialog { width:min(760px,calc(100% - 28px)); max-height:88vh; border:0; border-radius:15px; padding:0; color:var(--ink); box-shadow:0 20px 80px #15271b40; }
+dialog::backdrop { background:#17231ccc; }
+.detail { padding:26px 28px 24px; overflow:auto; max-height:88vh; }
+.detail h2 { font:600 24px/1.35 Georgia,"Microsoft YaHei",serif; margin:8px 42px 8px 0; }
+.close { float:right; border:0; background:var(--pale); width:34px; height:34px; border-radius:50%; cursor:pointer; font-size:20px; color:var(--green); }
+.detail section { border-top:1px solid var(--line); padding-top:14px; margin-top:15px; }
+.detail h3 { font-size:13px; color:var(--green); margin:0 0 6px; }
+.detail p { margin:0; color:#465047; }
+.markdown h1 { font-size:20px; margin:0 0 12px; }
+.markdown h2 { font-size:17px; margin:20px 0 8px; }
+.markdown h3 { font-size:15px; margin:16px 0 7px; }
+.markdown p { margin:0 0 12px; }
+.markdown ul,.markdown ol { padding-left:24px; margin:6px 0 13px; }
+.markdown li { margin:4px 0; }
+.markdown blockquote { margin:12px 0; padding:3px 13px; border-left:3px solid #b4c9b4; background:#f5f8f2; }
+.markdown pre { padding:12px; border-radius:8px; overflow:auto; background:#f1f4ef; }
+.markdown code { padding:1px 4px; border-radius:4px; background:#f1f4ef; }
+.markdown pre code { padding:0; background:none; }
+.markdown table { display:block; overflow-x:auto; border-collapse:collapse; margin:10px 0; }
+.markdown th,.markdown td { padding:6px 9px; border:1px solid var(--line); }
+.markdown .katex-display { overflow-x:auto; overflow-y:hidden; }
+.method-link { display:inline-block; margin-top:6px; color:var(--green); font-size:13px; }
+.open-pdf { display:inline-block; margin-top:18px; border-radius:8px; padding:9px 14px; background:var(--green); color:white; text-decoration:none; font-weight:600; }
+.open-pdf:hover { background:#244832; }
+@media(max-width:700px) { .toolbar { grid-template-columns:1fr 1fr; } .toolbar input { grid-column:1/-1; } .grid { grid-template-columns:1fr; } header,main { padding-left:17px; padding-right:17px; } }
+
+.group-count { color:#899388; font-weight:400; }
+.added-date { margin-top:8px; }

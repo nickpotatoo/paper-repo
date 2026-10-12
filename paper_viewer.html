@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>论文资料库</title>
+  <link rel="stylesheet" href="./vendor/katex/katex.min.css">
+  <script src="./vendor/marked.umd.js"></script>
+  <script src="./vendor/katex/katex.min.js"></script>
+  <link rel="stylesheet" href="./viewer/styles/main.css">
+</head>
+<body>
+  <div class="top"><header>
+    <div class="eyebrow">PAPER STOCK · 研究资料</div>
+    <h1>论文资料库</h1>
+    <p class="subtitle">按主题浏览论文，搜索编号、标题、内容与标签。单击卡片查看详情，双击直接打开 PDF。</p>
+  </header></div>
+  <main>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="搜索编号、标题、内容或标签…" aria-label="搜索论文">
+      <select id="category" aria-label="按分类筛选"><option value="">全部分类</option></select>
+      <button id="open-semantic" class="action" type="button" disabled>向量检索</button>
+    </div>
+    <details class="date-filter-panel">
+      <summary>入库时间筛选</summary>
+      <div class="date-filters" role="group" aria-label="按入库日期筛选">
+      <label for="added-from">入库日期从 <input id="added-from" type="date"></label>
+      <label for="added-to">至 <input id="added-to" type="date"></label>
+      <button id="clear-dates" class="action" type="button">清除日期</button>
+      <span class="date-hint">北京时间，包含起止日期；留空表示不限</span>
+      </div>
+    </details>
+    <div id="status" class="status" role="status" aria-live="polite">正在读取论文索引…</div>
+    <button id="clear-semantic" class="action" type="button" hidden>返回全部论文</button>
+    <div id="results"></div>
+  </main>
+  <dialog id="dialog"><div id="detail" class="detail"></div></dialog>
+  <dialog id="semantic-dialog" class="search-dialog" aria-labelledby="semantic-title">
+    <form id="semantic-form">
+      <h2 id="semantic-title">向量检索</h2>
+      <label for="semantic-query">描述你想查找的研究问题或方法</label>
+      <textarea id="semantic-query" required maxlength="4000" placeholder="例如：能够在端侧管理长期记忆并支持遗忘的智能体方法"></textarea>
+      <label for="semantic-top-k">返回数量</label>
+      <input id="semantic-top-k" type="number" min="1" max="100" value="5" required>
+      <div id="semantic-status" class="status" role="status" aria-live="polite"></div>
+      <div class="search-actions">
+        <button id="semantic-cancel" type="button" class="action">取消</button>
+        <button id="semantic-submit" type="submit" class="action">搜索</button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module" src="./viewer/js/app.js"></script>
+</body>
+</html>
