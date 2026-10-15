@@ -4,14 +4,14 @@ export function emptyFilters() {
   return {term:'', categoryId:'', addedFrom:'', addedTo:''};
 }
 
-export function filterPapers(library, filters, semantic = null) {
+export function filterPapers(repo, filters, semantic = null) {
   const {term, categoryId, addedFrom, addedTo} = filters;
   if (addedFrom && addedTo && addedFrom > addedTo) throw new Error('起始日期不能晚于结束日期。');
-  const candidates = semantic === null ? library.papers : semantic.ids.map(id => library.papersById.get(id)).filter(Boolean);
+  const candidates = semantic === null ? repo.papers : semantic.ids.map(id => repo.papersById.get(id)).filter(Boolean);
   const query = term.trim().toLocaleLowerCase();
   const matches = candidates.filter(paper => {
     if (categoryId && paper.classification?.primary_category !== categoryId) return false;
-    if (query && !library.searchable(paper).includes(query)) return false;
+    if (query && !repo.searchable(paper).includes(query)) return false;
     if (addedFrom || addedTo) {
       const date = addedDate(paper);
       if (!date || (addedFrom && date < addedFrom) || (addedTo && date > addedTo)) return false;

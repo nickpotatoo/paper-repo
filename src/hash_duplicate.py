@@ -1,16 +1,11 @@
-"""内容哈希接口：用于文件去重和内容变更检测，仅依赖 Python 标准库。
-
-统一返回 SHA-256 的 64 位小写十六进制字符串，不写入索引或向量库。
-"""
-
-from __future__ import annotations
-
-import hashlib
+import json
 from os import PathLike
 from pathlib import Path
+import hashlib
 
-__all__ = ["hash_bytes", "hash_text", "hash_file"]
+from src.config import PAPERS_PATH
 
+__all__ = ["hash_bytes", "hash_text", "hash_file", "compare_hash"]
 
 def hash_bytes(data: bytes) -> str:
     """计算原始字节的 SHA-256；空字节也有确定的哈希值。"""
@@ -48,3 +43,26 @@ def hash_file(
         while chunk := source.read(chunk_size):
             digest.update(chunk)
     return digest.hexdigest()
+
+def _load_hash() -> list[str]:
+    """读取 papers.json 中所有已收录论文的 SHA-256；缺失字段时保留异常。"""
+    with PAPERS_PATH.open(encoding="utf-8") as source:
+        papers = json.load(source)
+    if not isinstance(papers, list):
+        raise ValueError("papers.json 必须为论文数组")
+    return [
+        paper["metadata"]["sha256"]
+        for paper in papers
+    ]
+
+def compare_hash(digest: str | None = None, path: str | PathLike[str] | None = None) -> bool:
+    """比较已收录 PDF 的 SHA-256；未提供 digest 时读取 path 计算。"""
+    if digest is None:
+        if path is None:
+            raise ValueError("digest 和 path 不能同时为 None")
+        digest = hash_file(path)
+    if not isinstance(digest, str):
+        raise TypeError("digest 必须是字符串")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError("digest 必须为 64 位小写十六进制 SHA-256")
+    return digest in _load_hash()

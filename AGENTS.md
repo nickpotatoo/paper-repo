@@ -1,180 +1,220 @@
 # 论文资料库维护指南
 
-本目录保存论文 PDF、中文检索索引和逐篇方法文档。新增或更新论文时，先阅读论文，再同步维护 PDF、`paper_index.json` 和 `methods/*.md`。索引负责快速检索；Markdown 负责较长的方法说明。
+本项目维护论文 PDF、中文检索资料、精细总结 Markdown 和向量检索数据。整理资料前重新阅读当前 `AGENTS.md`；完成后说明本次修改的论文编号、文件重命名情况、资料核对及向量生成结果。用户当次的明确要求优先。
 
-## 目录与职责
+## 当前目录与职责
 
-- `01_personal-and-wearable-lifelogging/` 等分类文件夹：存放 PDF。当前有五类，后续可按论文主题扩充；分类定义以 `paper_index.json` 的 `category_index` 为准。
-- `paper_index.json`：论文基本信息、主分类、内容概述、统一标签表，以及方法文档路径。
-- `methods/`：每篇论文一份独立 Markdown 方法文档。文件名与索引中的 `paper_id` 完全一致（保留大写 P），例如 `P000001.md`。
-- `start_viewer.bat`、`launch_viewer.ps1`、`paper_server.py`、`paper_viewer.html`：本地查看器。启动器默认读取同目录的 `paper_index.json` 并启动仅监听 `127.0.0.1` 的服务；点开卡片后，页面才请求该篇 Markdown。
-- `migrate_methods.py`、`migrate_tags.py`：历史数据迁移工具。日常新增论文可以直接按下述格式编辑，不必运行迁移工具。
+```text
+launch.py                    # 启动入口
+paper_viewer.html            # 页面布局
+src/
+  config.py                  # 统一路径、环境变量、向量参数
+  load_data.py               # 数据读取与可选校验
+  template.py                # 空资料库和论文记录模板
+  hash_duplicate.py          # SHA-256 工具与已收录论文哈希比较
+  server.py                  # 本地 HTTP 服务
+  semantic_search/
+    bridge.py                # SSBridge 接口、嵌入文本构建
+    transformer.py           # 嵌入服务调用
+    store.py                 # 文本分块、向量保存与检索
+data/
+  papers.json                # 论文对象数组
+  taxonomy.json              # 分类、标签与文献类型定义
+  repo_state.json            # 编号计数器
+  pdfs/<分类ID>/<filename>   # 例如 pdfs/C002/example.pdf
+  detailed_summaries/<paper_id>.md      # 例如 detailed_summaries/P000020.md
+  vectors/                   # 向量分片目录
+    vectors_1.jsonl          # 首个分片
+    vectors_2.jsonl          # 后续分片按数字递增
+viewer/                      # 原生 JavaScript 模块、样式和已有测试
+vendor/                      # 本地 Marked、KaTeX 依赖
+new_paper/                   # 待整理论文；以实际文件为准
+```
 
-## 新增论文的顺序
+`src` 下通用模块直接位于该目录，导入使用 `src.config`、`src.load_data`、`src.server` 等；向量模块使用 `src.semantic_search`。历史迁移脚本已移除，不调用或重新生成这些脚本。
 
-0. **先阅读本指南。** 每次开始整理论文前，重新阅读当前 `AGENTS.md`，确认规则是否有更新，并以最新版本为准；不能只依赖之前任务中的记忆或旧说明。完成整理后，在交付说明中提醒用户已先核对 `AGENTS.md`。
-1. **核对来源与重复项。** 检查标题、作者、年份、DOI 或 arXiv 编号及现有文件，避免重复收录。不要覆盖同名但内容不同的 PDF。
-2. **检查并规范文件名。** 新加入的 PDF 使用稳定、易检索的英文小写短横线文件名（例如 `paper-title-2026.pdf`），不要保留下载站随机名、`最终版`、重复标题后缀等临时命名。若原文件尚未按此规则重命名，应先重命名；在交付说明中提醒用户该文件已重命名，并同步填写 `metadata.original_filename`（重命名前的来源文件名）和 `metadata.relative_path`（当前规范文件名）。如文件名可能冲突，先核对论文身份，不得覆盖其他文件。
-3. **阅读论文。** 至少读标题页、摘要、引言、方法/系统设计和实验或讨论部分。图表可用于理解流程，但数值和结论应以论文原文为准。扫描版如无法可靠提取文字，先标明提取限制，不要凭文件名补写细节。
-4. **选择一个主分类并移动 PDF。** 先阅读 `category_index` 中各分类的中文名称和描述，选择一个主分类 ID，并将 PDF 移至该条目 `folder` 指定的目录；跨主题信息通过标签表达。若新主题无法准确归入已有分类，可以新增分类，按下方规则同步更新目录和索引。
-5. **写方法 Markdown。** 先按下方编号规则为新论文分配 `paper_id`，再在 `methods/` 创建同名文档（例如 `methods/P000020.md`），先写清研究问题、输入、核心流程、模块或算法、输出和评估方式。篇幅以论文实际信息为准，目标是比索引概述具体得多，不要为了凑长度推测未给出的实现细节。
-6. **维护标签索引。** 先在 `paper_index.json` 的 `tag_index` 中寻找同义或近义标签，复用现有 ID。确需新标签时增加下一个未使用的 `TNNN` ID，并在论文记录中只引用 ID。
-7. **分配编号并新增论文记录。** 使用前面已分配的稳定 `paper_id`，按示例结构加入 `papers` 数组，并填写 `added_at` 入库时间，同步更新顶层 `paper_count` 和 `paper_id_counter`。JSON 保存为 UTF-8，路径使用相对于本目录的 `/` 分隔形式。
-8. **核对关联。** 确认 PDF 与 Markdown 路径存在、每个分类 ID 在 `category_index` 中有定义、PDF 路径的分类目录与该条目 `folder` 一致、每个标签 ID 在 `tag_index` 中有定义、Markdown 文件名不与其他论文共用。重新运行 `start_viewer.bat`，或刷新已打开的查看器页面，即可查看新内容。
-9. **生成新论文向量。** PDF、JSON 和方法 Markdown 全部保存并核对关联后，必须调用 `SSBridge.create_vector(index=paper_id)` 为本次新增的每篇论文生成向量；批量新增时逐篇调用，使用稳定的论文编号。检查返回结果，并在交付说明中报告各论文的向量生成状态。具体调用方式见下方“新论文向量生成要求”。
+资料仅维护上述三个 JSON 文件，不生成 `paper_index.json`，也不拆成逐篇 JSON。前端分别加载论文与分类标签，调用 `createRepo(papers, taxonomy)`。
 
-### 新论文文件重命名提醒
+## 数据格式与路径规则
 
-后续处理新论文时，必须检查 PDF 是否已使用规范文件名。若尚未重命名，先按上述命名规则重命名，再更新索引中的 PDF 路径；完成后在回复中明确提示“原文件名 → 新文件名”。`metadata.original_filename` 记录收到时的原始名称，`metadata.relative_path` 则始终填写重命名后的实际路径。不要为了统一而批量改动已收录论文的文件名，除非本次任务明确要求整理历史文件。
+JSON 使用 UTF-8、英文 snake_case 字段名。论文概述、分类名称和描述、标签及文献类型的规范名称使用中文；RAG、AR 等通用缩写可保留。分类、标签与文献类型的引用使用稳定英文编号，提取状态等状态值使用英文。
 
-## 分类扩充规则
+### papers.json
 
-当前五类只是现有论文的组织方式，不是固定或封闭的分类表。出现新的明确研究主题时，可新增主分类，无需强行放入相近但不准确的旧类别。
-
-分类统一定义在顶层 `category_index`，分类 ID 使用稳定的 `C` 加至少三位补零数字（例如 `C001`），与论文编号 `P000001`、标签编号 `T001` 分开维护。论文的 `classification.primary_category` 只保存一个分类 ID 字符串，不能保存名称、描述或文件夹，也不能重新使用旧的 `category_descriptions` 结构。
-
-每个分类条目必须包含以下三个字段，字段名保持英文：
-
-- `name`：简明的中文分类名称，例如“智能体记忆机制”；新增前检查同义或近义名称，避免重复分类。
-- `folder`：本目录下实际分类文件夹的英文名称，例如 `02_agent-memory-mechanisms`，不包含绝对路径或末尾 `/`。PDF 的 `metadata.relative_path` 使用 `folder/文件名.pdf`。
-- `description`：中文主题定义，说明该分类收录哪些研究，供 Agent 判断归类。
-
-新增前检查现有分类并复用相同主题的 ID；确需新增时，使用当前分类 ID 最大数字加一，不得修改或复用已分配 ID。分类文件夹仍使用下一个未使用的两位数字编号和英文小写短横线名称，例如 `06_new-research-topic`，创建后在 `category_index` 中登记对应 `folder`。文件夹编号与分类 ID 是独立字段，不能靠截取 ID 推算文件路径。`metadata.relative_path` 必须指向该分类 `folder` 中的 PDF。
-
-修改分类的中文名称或描述时保留 ID。重命名分类文件夹时，同步更新条目的 `folder`、实际目录以及所有受影响论文的 `metadata.relative_path`。调整论文分类时更新其 `classification.primary_category`，移动 PDF 后同步更新路径。合并分类前将所有论文引用改到保留 ID，并按保留分类的目录移动 PDF、更新路径，再移除旧条目。每次整理后确认所有分类引用均有定义、每个分类目录存在且 PDF 路径与对应 `folder` 一致。
-
-
-## JSON 结构
-
-所有 JSON 字段统一使用下方示例中的英文 snake_case 名称，代码与文档必须使用相同字段名。`description`、`category_index` 中的 `description`、`summary` 和 `reading_notes` 保留中文描述，`category_index` 中的 `name` 和 `tag_index` 中的规范标签名称使用中文（如 RAG、AR 等通用缩写可保留）；文献类型、提取状态等其他值使用英文。`extraction_status` 当前使用 `text_extractable`；无法提取时使用 `text_unextractable`，详细限制写入中文 `reading_notes`。新增规范标签使用中文名称，先检查现有 `tag_index` 并复用同义标签 ID。
-
-顶层保留 `description`、`category_index`、`tag_index`、`paper_count`、`paper_id_counter`、`papers`。`category_index` 和 `tag_index` 分别集中保存分类定义与规范标签。分类示例：
+顶层为数组，每篇记录使用以下结构。示例的编号、时间、文件名和文献信息均需替换；哈希必须计算真实 PDF 内容。
 
 ```json
-"category_index": {
-  "C002": {
-    "name": "智能体记忆机制",
-    "folder": "02_agent-memory-mechanisms",
-    "description": "通用对话/LLM 智能体的长期记忆组织、检索、治理及推理方法。"
+[
+  {
+    "paper_id": "P000020",
+    "added_at": "2026-10-07T21:27:38+08:00",
+    "metadata": {
+      "title": "Paper title as printed on the PDF",
+      "original_filename": "Paper title.pdf",
+      "filename": "paper-title-2026.pdf",
+      "sha256": "<实际 PDF 的 64 位小写十六进制 SHA-256>",
+      "document_type": "D004",
+      "authors": "Author Name; Author Name",
+      "year": 2026
+    },
+    "classification": {
+      "primary_category": "C002",
+      "tags": ["T017"]
+    },
+    "summary": "用一至三句中文说明研究问题、主要贡献和应用范围。"
+  }
+]
+```
+
+- `paper_id` 是唯一、稳定的论文标识，查询和关联均使用它，不能依赖数组下标、标题或文件名。
+- `metadata.document_type` 只保存 `taxonomy.json` 中 `document_type_index` 定义的单个类型 ID，例如 `D004`；不保存自由文本名称。
+- `filename` 只保存当前 PDF 文件名，不包含目录、路径分隔符或绝对路径。`original_filename` 保留收到文件时的来源名称，后续重命名时不改写。
+- PDF 实际路径为 `PDFS_DIR / classification.primary_category / metadata.filename`。
+- 精细总结实际路径为 `DETAILED_SUMMARIES_DIR / (paper_id + ".md")`，文件名保留大写 `P`。
+- 不保存 `relative_path`、`method_document`、`method_summary`、`detailed_summary_document`、`reading_notes`、`paper_count` 等已移除或可推导字段。精细总结路径统一按论文编号推导，不从记录读取自定义路径。
+- `authors`、`year` 无法从论文可靠确认时填 JSON `null`，不要填字符串 `"null"` 或猜测。
+- 阅读依据、提取限制和实验前提写入对应 Markdown 的“资料整理说明”；通用整理套话无需逐篇保存。
+- 约定缺少 `extraction_status` 表示 `text_extractable`；只有确实无法提取时记录 `text_unextractable`，详细限制写入 Markdown。该字段是资料记录约定，当前查看器不展示它。
+
+### taxonomy.json
+
+顶层包含 `category_index`、`tag_index`、`document_type_index`：
+
+```json
+{
+  "category_index": {
+    "C002": {
+      "name": "智能体记忆机制",
+      "description": "通用对话与 LLM 智能体的长期记忆组织、检索、治理及推理方法。"
+    }
+  },
+  "tag_index": {
+    "T017": "图记忆"
+  },
+  "document_type_index": {
+    "D004": "方法与实验"
   }
 }
 ```
 
-`tag_index` 只存一份规范名称：
+分类 ID 是对象的键，例如 `C002`；它同时作为 PDF 分类目录名。分类条目只保存中文显示名称 `name` 和主题定义 `description`，不保存 `folder`。修改中文名称不改变分类 ID，也不重命名 PDF 目录。
 
-```json
-"tag_index": {
-  "T001": "个人知识图谱",
-  "T017": "图记忆"
-}
-```
+论文只引用一个主分类 ID；跨主题信息通过标签表达。标签在 `tag_index` 中只保存一份规范名称，论文的 `classification.tags` 仅引用 ID，且同篇不重复。
 
-每篇论文使用如下结构；示例中的路径和 ID 应替换为实际值：
+### repo_state.json
 
 ```json
 {
-  "paper_id": "P000020",
-  "added_at": "2026-10-07T21:27:38+08:00",
-  "metadata": {
-    "title": "Paper title as printed on the PDF",
-    "original_filename": "Paper title.pdf",
-    "relative_path": "02_agent-memory-mechanisms/Paper title.pdf",
-    "sha256": "<PDF 原始内容的 64 位小写十六进制 SHA-256>",
-    "document_type": "Method and experiments",
-    "authors": "Author Name; Author Name",
-    "year": 2026
-  },
-  "classification": {
-    "primary_category": "C002",
-    "tags": ["T017"]
-  },
-  "summary": "用一至三句中文说明论文解决什么问题、主要贡献和应用范围。",
-  "reading_notes": "根据论文摘要、引言及方法部分整理；为中文概述，不是逐字翻译。",
-  "extraction_status": "text_extractable",
-  "method_document": "methods/P000020.md"
+  "paper_id_counter": 20
 }
 ```
 
-`authors`、`year` 无法从论文可靠确认时填 `null`，不要猜测。`classification.tags` 只填 ID，不能写中文标签名称；不要在论文记录中重新加入长篇 `method_summary`。索引的 `summary` 应简短，具体方法写入 Markdown。
+`paper_id_counter` 保存已分配论文编号的最大数字，只增不减，即使删除论文或入库中断也不能降低。
 
-`metadata.sha256` 保存实际 PDF 原始字节的 SHA-256，使用 `utils.hash.hash_file()` 计算，不得根据标题或文件名生成。新增论文时一并填写；替换 PDF 内容后重新计算，单纯重命名或移动文件不改变哈希。
+## 新增论文的顺序
 
-## 论文唯一编号规则
+1. **核对来源与重复项。** 检查标题、作者、年份、DOI/arXiv 编号及现有记录；用 `src.hash_duplicate.hash_file()` 计算原始 PDF 的 SHA-256，并与 `metadata.sha256` 比较。重复导入或更新同一论文时保留原编号，不新建重复记录，也不覆盖同名但内容不同的 PDF。
+2. **阅读原文。** 至少阅读标题页、摘要、引言、方法或系统设计，以及实验或讨论。数值与结论以原文为准。扫描或提取失败时记录限制，不凭文件名推测内容；不需要为代码或文档维护任务重新阅读全部论文。
+3. **确定分类、标签、文献类型和文件名。** 先复用现有分类、近义标签与文献类型；确需新增时按下文扩充。新 PDF 使用稳定、可检索的英文小写短横线文件名。记录来源文件名，必要时先重命名，再放入 `PDFS_DIR/<分类ID>/`。
+4. **一次性预留论文编号。** 读取状态计数器与现存论文编号最大数字，取较大者加一，生成 `P` 加至少六位数字的 ID。先保存递增后的计数器，再用这个编号创建精细总结文档和论文记录；后续步骤不重新分配。中断允许留下空号，已经预留的编号不复用。
+5. **编写精细总结 Markdown。** 创建 `DETAILED_SUMMARIES_DIR/<paper_id>.md`，按实际内容说明研究问题、输入、核心流程、关键模块、输出和评估。具体程度应明显高于索引概述，不推测论文未给出的细节。
+6. **保存论文记录。** 在 `papers.json` 数组加入记录，写入真实哈希、主分类 ID、标签 ID、文献类型 ID 和简短概述。`added_at` 使用实际当前北京时间的带时区 ISO 8601 值，不复制示例时间。新增定义同步保存到 taxonomy。
+7. **核对关联。** 确认编号唯一、计数器有效、分类和标签均已定义，生成的 PDF 与 Markdown 路径存在。检查校验返回的描述列表；不能只因没有异常就认定资料完整。
+8. **生成向量。** 全部资料保存后，逐篇调用 `SSBridge.create_vector(index=paper_id)`，核对返回值并记录结果。失败时保留已整理资料，明确报告失败原因和未生成向量的编号。
 
-每篇论文记录顶层的 `added_at` 保存首次入库时间，使用带时区偏移的 ISO 8601 格式，例如 `2026-10-07T21:27:38+08:00`。新增论文时读取实际当前时间，按北京时间 Asia/Shanghai（UTC+08:00）填写，不得复制示例时间。更新已有论文、重命名或调整分类时保留原入库时间。本次历史数据统一补录为 `2026-10-07T21:27:38+08:00`，这是补录时间，不代表真实的历史入库时间。
+重命名新加入的 PDF 时，在交付说明中列出“原文件名 → 新文件名”和论文编号。不要为了命名统一而批量重命名历史论文，除非用户明确要求。重命名或移动文件不改变内容哈希；替换 PDF 内容后必须重新计算。
 
-- 每篇论文必须在记录顶层保存唯一的 `paper_id`，格式为 `P` 加至少六位十进制数字，例如 `P000001`、`P000020`。数字从 1 开始，使用六位补零；超过六位后自然扩展，不添加多余前导零。
-- 新增前先核对是否为已收录论文；重复导入或更新同一论文时保留原编号。标题、文件名、分类、文档路径和数组顺序变化时也不得改变编号。
-- 顶层 `paper_id_counter` 保存已分配编号的最大数字，首次分配后只增不减。新增时取计数器与现存编号数字最大值中的较大者加一，并更新计数器。删除论文后保留计数器，已使用编号永不复用。
-- 代码以 `paper_id` 作为论文标识，通过编号映射查询记录；不得用数组下标、标题或文件路径作为稳定标识。PDF 和 Markdown 路径仍从该记录读取。
-- 方法文档必须命名为 `methods/<paper_id>.md`，例如 `methods/P000020.md`；文件名严格对应论文编号，不能使用数组序号或标题作为文件名。`method_document` 必须记录同一相对路径。
-- 完成新增或更新后，检查所有论文编号存在、格式正确、互不重复，且计数器不小于现有编号的最大值。交付说明中列出本次新增论文的编号。
-- 历史记录缺少编号时，可运行 `python utils/migrate_paper_ids.py` 补齐；工具保留已有编号并检查格式与重复项，重复运行不会重新分配编号。
+哈希接口位于 `src.hash_duplicate`：`hash_file(path)`、`hash_text(text)`、`hash_bytes(data)` 返回 64 位小写十六进制 SHA-256。`compare_hash(path=pdf_path)` 计算并查询已收录哈希，或传入 `compare_hash(digest=digest)` 复用已计算的值，返回布尔值。两者均提供时使用 `digest`；均未提供时抛出异常。哈希相同只能确认字节内容相同，不代替标题和来源核对。
 
-## 标签维护规则
+## 分类、标签和编号维护
 
-- ID 是稳定引用。已有标签改名时，只改 `tag_index` 中的名称；论文记录中的 ID 保持不变。
-- 添加标签前检查当前 `tag_index` 中的规范标签。不同措辞若表达相同概念，复用原 ID。例如“第一视角视频”归入 `第一视角`，“可穿戴”归入 `可穿戴设备`，“多模态”归入 `多模态记忆`。
-- 新概念使用当前最大编号加一，例如 `T053`。一个论文内不要重复引用同一个 ID。
-- 合并既有标签时，先把所有论文引用改到保留的 ID，再移除废弃 ID；不能让索引留下未定义引用。
-- `migrate_tags.py` 现在会拒绝论文记录中的自由文本标签，可用于检查是否误写了名称。它不会替你判断新的语义近义词。
+- 分类使用 `C` 加至少三位数字，例如 `C001`；新主题无法准确归入已有类别时可扩充，不强行归入近似类别。新增前检查同义主题，按现存最大分类数字加一分配，并创建同名 PDF 目录。已有分类 ID 保持稳定。
+- 调整论文主分类时修改 `classification.primary_category` 并移动 PDF；`filename` 只在文件本身改名时更新。合并分类前改完所有引用、移动文件并核对同名冲突，再移除旧定义。
+- 标签使用 `T` 加至少三位数字；新增概念按现存最大标签数字加一分配。复用近义名称，例如“第一视角视频”归入“第一视角”，“可穿戴”归入“可穿戴设备”，“多模态”归入“多模态记忆”。
+- 标签改名只改 `tag_index`；合并标签先修改全部引用，再移除旧定义，不留下未定义 ID。
+- 文献类型集中保存在 `document_type_index`，结构为类型 ID 到中文规范名称的映射。ID 使用 `D` 加至少三位数字，例如 `D004`；新增前检查同义和近义类型，优先复用，确需新增时使用现存最大数字加一。类型不表示论文主题，不能替代主分类或标签；同篇只引用一个类型 ID。
+- 类型改名仅修改 `document_type_index` 名称，保留 ID。合并类型或调整论文类型时更新论文引用；向量 metadata 不再保存文献类型，类型调整不需要修改向量或重新嵌入正文。删除类型前确认没有剩余引用，不复用已使用的 ID。
+- 论文 ID 使用规范形式 `P000001`，数字大于零，超过六位后自然扩展，不增加多余前导零。删除、重命名、分类调整、数组重排均不改变已分配 ID。
+- `added_at` 保存首次入库时间，更新已有记录时保留。部分历史记录的 `2026-10-07T21:27:38+08:00` 是补录时间，不代表真实历史入库时间。
+- 修改资料时保留既有内容；保存 JSON 可先写同目录临时文件再替换，避免写入中断留下半个文件。涉及多个文件时先保存被引用的定义或预留状态，再保存论文记录。
 
-## 方法 Markdown 建议格式
+## 精细总结文档要求
 
-```markdown
-# Paper title
+建议结构：研究问题与设定、方法流程、关键设计、评估方式与结论、局限与适用范围。综述可改写为文献筛选和分类框架；概念论文按系统模块说明，不强行套用训练流程。
 
-## 研究问题与设定
-说明任务、输入数据、使用场景和作者要解决的限制。
+关键事实尽量标注节号或 PDF 页码。区分作者明确陈述与自己的分析，实验条件、指标和数值必须可回查。未说明的实现细节写“文中未说明”或略去。支持常见 Markdown、行内 `$...$`/`\(...\)` 和独立 `$$...$$`/`\[...\]` 公式，复杂公式使用 KaTeX 支持的命令。详见 `data/detailed_summaries/README.md`。
 
-## 方法流程
-按实际步骤描述数据如何进入系统、经过哪些模块、如何检索或推理、最后产生什么输出。
+## 读取和校验接口
 
-## 关键设计
-解释论文特有的表示方法、算法、训练或更新策略，以及这些设计的作用。
+`src/load_data.py` 不写文件、不生成缓存或聚合索引：
 
-## 评估方式与结论
-说明所用数据集/基准、对比对象和最重要的观察；数值必须与原文一致。
+- `load_papers()`、`load_taxonomy()`、`load_state()` 均返回二元组 `(data, errors)`，默认校验单文件结构；调用示例为 `papers, errors = load_papers()`。不接受 `errors` 参数，必须检查返回的问题列表。
+- `validate_data(papers, taxonomy, state, ...)` 校验结构与关联，返回描述列表，无问题返回 `[]`。
+- `load_data()` 返回包含 `papers`、`taxonomy`、`repo_state`、`errors` 的字典，默认执行关联校验。
+- `validate=False` 跳过校验，但文件读取和 JSON 解析错误仍会抛出；此时 `load_data()` 的 `errors` 为 `[]`。
+- `validate_data()` 始终检查分类目录、PDF 和 Markdown 是否存在；`load_data(validate=True)` 同样执行该检查，不提供 `check_files` 参数。默认使用配置中的附件目录；显式传入 `root` 时检查该根目录下的 `data/pdfs/` 和 `data/detailed_summaries/`。校验不重新计算 PDF 哈希。
 
-## 局限与适用范围
-仅记录论文明确说明或由方法条件直接推得的限制，并区分原文陈述与自己的分析。
-```
+不可处理的结构、无效或重复编号、无效或落后的计数器、不安全文件名或路径属于致命错误。标题、概述、来源文件名、文献类型、作者和年份类型、入库时间、哈希格式、未定义引用、空名称、重复标签、附件缺失等问题收集到列表。`added_at` 必须为真实有效、含秒且带 `+08:00` 的 ISO 8601 时间。应查看列表并处理问题，不把非致命结果等同于校验全部通过。前端 `createRepo` 对未定义分类或标签等仍有严格检查，服务端继续运行不保证页面能加载异常记录。
 
-综述或概念框架论文可将“方法流程”换成文献筛选、分类框架或系统模块，不必强行套用训练流程。若论文没有说明某个细节，写“文中未说明”或略去。建议在关键事实后标出论文节号或页码，便于日后回查。
+## 启动、接口和配置
 
-查看器支持常见 Markdown，以及 `$...$`、`\(...\)` 行内公式和 `$$...$$`、`\[...\]` 独立 LaTeX 公式。复杂公式请使用 KaTeX 支持的命令。详细编辑示例见 `methods/README.md`。
+在项目根目录运行 `python launch.py`；加 `--no-open-viewer` 只启动服务。Python 需要 3.10 或更新版本。前端使用原生 ES Modules 和本地 vendor 依赖，无需 npm 构建，通过 HTTP 访问。
 
-## 本地查看器与更新行为
+启动器仅在没有既有资料的空目录初始化三个 JSON；部分缺失或已有资料但配置缺失时会报错。随后创建附件目录并由 `src.server.launch()` 读取、校验资料。服务仅监听 `127.0.0.1`，`launch.py` 默认端口为 `5000`；可用 `--port <端口>` 指定，`--port 0` 自动分配空闲端口。致命错误阻止启动，非致命描述输出到 stderr。服务连续约十分钟无请求后退出，页面通过心跳维持活动。
 
-双击 `start_viewer.bat`，启动器自动使用同目录的 `paper_index.json`，启动本地 HTTP 服务并在服务就绪后打开浏览器，不弹出文件选择窗口。若需使用其他索引，可从命令行运行 `launch_viewer.ps1 -IndexPath <JSON 路径>`。页面先读取索引，打开论文卡片时才从原始 Markdown 文件读取该篇方法正文，不生成临时 JS 缓存。单击卡片看详情，双击打开 PDF。搜索范围为编号、标题、内容概述和标签，不包含尚未打开的 Markdown 全文。运行查看器需要 Python 3.10 或更新版本。
+| 路由 | 内容 |
+| --- | --- |
+| `GET /papers.json` | 论文数组 |
+| `GET /taxonomy.json` | 分类、标签与文献类型定义 |
+| `GET /repo_state.json` | 编号状态 |
+| `GET /files/pdfs/<分类ID>/<filename>` | 映射到 `PDFS_DIR` |
+| `GET /files/detailed_summaries/<paper_id>.md` | 映射到 `DETAILED_SUMMARIES_DIR` |
+| `POST /api/semantic-search` | 接收 `query`、`top_k`，返回 `paper_ids` |
+| `GET /heartbeat` | 页面心跳 |
 
-修改 Markdown 或 JSON 后，刷新浏览器页面即可读取最新内容；已经打开的卡片需要重新打开。持久内容只维护本目录中的 PDF、JSON 和 Markdown。
+前端不读取状态文件，论文与 taxonomy 分别加载；Markdown 在打开详情时才读取。单击看详情，双击打开 PDF。关键词搜索覆盖编号、标题、文献类型、分类名称和描述、标签名称及概述，不搜索 Markdown 全文。语义搜索结果通过稳定编号关联论文。
 
-## 向量检索
+修改 JSON 或 Markdown 后刷新页面；前端会缓存已打开的精细总结正文，因此刷新后再打开详情。修改 Python、配置或环境变量后重启服务。其他资料文件可通过 `src.server.launch(papers_path=..., taxonomy_path=..., state_path=...)` 指定；附件根目录仍使用 `src/config.py` 的配置。
 
-页面“向量检索”按钮打开搜索框，通过 `POST /api/semantic-search` 将查询交给 HTTP 服务，再调用 `utils/semantic_search/bridge.py` 中的 `SSBridge.retrieve()`。返回值为 `paper_id` 列表，页面按检索顺序显示论文，不使用数组下标匹配。向量检索需要 `numpy`、`httpx`、`BGE_M3_API_KEY` 和预先创建的向量文件；默认位于索引目录的 `data/vectors.jsonl`。新增或更新论文时还需维护向量，详细配置与当前轮子的更新限制见 `utils/semantic_search/README.md`。
+配置统一位于 `src/config.py`，路径值为 `Path`：
 
-### 新论文向量生成要求
+- 默认 `DATA_DIR` 为项目根目录下的 `data/`，`PDFS_DIR` 为其下的 `pdfs/`，`DETAILED_SUMMARIES_DIR` 为其下的 `detailed_summaries/`。
+- `PAPERS_PATH` 环境变量覆盖论文文件；`DETAILED_SUMMARIES_DIR` 覆盖精细总结目录。taxonomy 和状态文件默认位置不随这两个变量改变。
+- 默认向量目录为 `data/vectors/`，由 `src.config.VECTOR_DATA_DIR` 配置；`SEMANTIC_SEARCH_DATA_DIR` 可直接覆盖该目录，也可通过 `SSBridge(vectors_dir=...)` 显式指定。首个分片为 `vectors_1.jsonl`，后续依次为 `vectors_2.jsonl`、`vectors_3.jsonl` 等；读取仅匹配该命名规则，按数字顺序处理。向量目录覆盖不改变 repo 元数据和 PDF 所在目录。
+- `VECTOR_MAX_ROWS` 位于 `src/config.py`，默认 `500`，必须为正整数，表示每个向量文件最多保存的物理行数（一条分块向量占一行）。写满后才创建下一个数字分片；一篇论文的分块可跨文件。重启后根据已有最大分片编号和该文件行数继续追加，检索和保存去重均扫描所有分片，不会因换文件而遗漏已有论文。降低上限不会自动重分已有文件，下一次写入会在需要时创建新分片。不要由多个进程同时写入同一组分片。
+- 系统环境变量优先；安装 `python-dotenv` 后依次加载 `src/.env`、`src/semantic_search/.env`，不覆盖已设置的值。未安装时只读取系统环境变量。不要输出、提交或改写用户的 API Key。
+- 现有 `.gitignore` 使用白名单，代码、查看器和说明文档可跟踪；论文 PDF、精细总结正文、资料 JSON、向量与 `.env` 默认忽略。不要擅自把私人资料纳入 Git。
 
-Agent 处理完新论文后，生成向量是收录流程的必要步骤。必须先保存最新 `paper_index.json` 和 `methods/<paper_id>.md`，再调用 `SSBridge`，确保嵌入包含已整理的内容概述和方法正文。在项目根目录使用以下方式，替换示例编号；向量文件路径必须与查看器 HTTP 服务使用的配置一致：
+## 向量生成与更新
+
+向量功能需要 `numpy`、`httpx`、`BGE_M3_API_KEY`；仅浏览资料不需要调用嵌入服务。模型、服务地址、分块参数和默认检索数量以统一配置为准。服务端在首次语义搜索时才初始化嵌入客户端，搜索读取已有向量，不自动创建向量。
+
+新增论文保存全部资料后，在项目根目录按稳定编号调用：
 
 ```python
-import os
-from pathlib import Path
-from utils.semantic_search.bridge import SSBridge
+from src.config import PAPERS_PATH, DETAILED_SUMMARIES_DIR, VECTOR_DATA_DIR
+from src.semantic_search.bridge import SSBridge
 
-root = Path.cwd().resolve()
-vectors_path = os.environ.get("VECTORS_PATH") or (
-    Path(os.environ.get("SEMANTIC_SEARCH_DATA_DIR", str(root / "data"))) / "vectors.jsonl"
-)
 bridge = SSBridge(
-    paper_index_path=root / "paper_index.json",
-    paper_method_dir=root / "methods",
-    vectors_path=vectors_path,
+    papers_path=PAPERS_PATH,
+    detailed_summaries_dir=DETAILED_SUMMARIES_DIR,
+    vectors_dir=VECTOR_DATA_DIR,
 )
 result = bridge.create_vector(index="P000020")
 ```
 
-`index` 参数传入论文的 `paper_id`，不是数组下标。返回列表应包含该编号：`saved=True` 表示新向量已保存，`saved=False` 表示相同 metadata 已存在而跳过，空列表不能视为成功。依赖、API Key、网络或嵌入服务导致生成失败时，保留已完成的论文资料，在交付说明中明确报告失败原因和未生成向量的编号，不得宣称该论文已可向量检索。不得在日志或回复中输出 API Key。
+嵌入文本为 `summary`、精细总结 Markdown、文献类型中文名称和标签中文名称；概述和精细总结正文必须为非空文本，精细总结文件必须存在且可读取，否则抛出异常，不静默生成仅含概述的向量。分块文本只用于调用嵌入服务，不写入向量文件。每条 JSONL 记录只保存 `vector` 和 `metadata`，其中 metadata 仅含 `title` 和 `index`；`index` 保存稳定的 `paper_id`（例如 `P000020`），不是数组下标。不保存正文、标签或文献类型。`SSBridge` 默认从配置中的 `TAXONOMY_PATH` 读取类型定义，自定义资料库时可传入 `taxonomy_path`，类型引用必须存在。返回列表必须包含目标编号：`saved=True` 表示已保存，`saved=False` 表示存在相同精简 metadata 而跳过；空列表不表示成功。依赖、网络、密钥或服务失败时保留资料，并明确报告原因与未生成向量的论文编号，不宣称已可向量检索。
 
-更新已收录论文的正文时，当前轮子可能因 metadata 相同而跳过；`saved=False` 不代表向量已反映正文更新，应按 `utils/semantic_search/README.md` 的限制处理。
+论文 metadata 由 bridge 中的 `Paper.get_metadata()` 直接构造，再传给 `VectorStore.save()`。store 不解释论文编号、不筛选或转换 metadata 字段，只按调用方传入的内容保存、比较。已有 metadata 的读取逻辑集中在 `_load_metadata_keys()`，由 `save()` 统一进行保存去重，bridge 不重复读取或检查。store 检索返回原始 metadata 与分数，不返回正文。
+
+仅支持 metadata 包含 `title` 和 `index` 的新向量格式，不兼容旧 `paper_id` 字段。保存前直接比较 metadata 检查重复，`SSBridge.retrieve()` 直接读取 `metadata["index"]` 并去重论文编号。现有旧向量文件暂不迁移或重建；不得直接用于新格式流程。
+
+保存逻辑按精简后的 `title` 和 `index` 去重，正文变化并不会自动触发更新；标签、文献类型、PDF 移动或纯路径结构调整不影响该比较。相同论文的标题变化时可能留下多个结果，页面还会按论文编号去重，最终数量可能少于 `top_k`。HTTP 接口当前接受 `top_k` 为 1 至 100。
+
+当前没有自动更新、删除或事务恢复接口。需要更新旧正文或清理已删除论文的向量时，先备份整组分片，以新的 `vectors_dir` 建立完整新库，核对后切换配置，不能只替换首个分片。不要在原库直接追加同一论文的新旧向量；不能用 `saved=False` 证明正文已经更新。
+
+## 代码与文档维护
+
+改动数据字段、目录或接口时，同步检查 `src/config.py`、`src/load_data.py`、`src/template.py`、相关后端调用、前端 `repo.js`/`utils.js`、已有测试文件和说明文档；避免重新引入已删除的派生字段或旧模块路径。前端开发说明见 `viewer/README.md`。
+
+按用户要求决定是否运行测试；用户要求不测试时，不启动测试脚本或额外调用嵌入服务，并在交付说明中如实说明。修改本文档只需核对现有实现，无需修改业务代码、论文内容或向量。

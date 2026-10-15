@@ -64,7 +64,7 @@ dialog::backdrop { background:#17231ccc; }
 .markdown table { display:block; overflow-x:auto; border-collapse:collapse; margin:10px 0; }
 .markdown th,.markdown td { padding:6px 9px; border:1px solid var(--line); }
 .markdown .katex-display { overflow-x:auto; overflow-y:hidden; }
-.method-link { display:inline-block; margin-top:6px; color:var(--green); font-size:13px; }
+.detailed-summary-link { display:inline-block; margin-top:6px; color:var(--green); font-size:13px; }
 .open-pdf { display:inline-block; margin-top:18px; border-radius:8px; padding:9px 14px; background:var(--green); color:white; text-decoration:none; font-weight:600; }
 .open-pdf:hover { background:#244832; }
 @media(max-width:700px) { .toolbar { grid-template-columns:1fr 1fr; } .toolbar input { grid-column:1/-1; } .grid { grid-template-columns:1fr; } header,main { padding-left:17px; padding-right:17px; } }

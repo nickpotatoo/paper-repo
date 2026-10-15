@@ -6,9 +6,13 @@ export function fileUrl(path) {
   return new URL(segments, new URL('/files/', location.href)).href;
 }
 
-export function pdfUrl(p) {
-  const path = p.metadata?.relative_path;
-  return path ? fileUrl(path) : '';
+export function detailedSummaryPath(paper) {
+  return `detailed_summaries/${paper.paper_id}.md`;
+}
+
+export function pdfUrl(paper, repo) {
+  const path = repo.pdfPath(paper);
+  return path ? fileUrl(`pdfs/${path}`) : '';
 }
 const addedDateFormatter = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Shanghai", year:"numeric", month:"2-digit", day:"2-digit"});
 export function addedDate(paper) {

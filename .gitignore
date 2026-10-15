@@ -6,19 +6,24 @@
 # 需要追踪的文件和路径
 !/.gitignore
 !/AGENTS.md
-!/launch_viewer.ps1
 !/LICENSE
-!/paper_server.py
 !/paper_viewer.html
-!/start_viewer.bat
 !/vendor/**
 !/viewer/**
-!/utils/**
+!/launch.py
+!/src/**
+!/data/README.md
 
 # 明确排除的资料与本地配置（优先于上方白名单）
 *.[pP][dD][fF]
-/methods/
-/paper_index.json
+/data/detailed_summaries/*
+!/data/detailed_summaries/README.md
+/data/papers.json
+/data/taxonomy.json
+/data/repo_state.json
+/data/vectors/
+/src/test/
+/viewer/tests/
 __pycache__/
 *.py[cod]
 .env

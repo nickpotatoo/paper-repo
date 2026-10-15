@@ -1,28 +1,29 @@
-import {fileUrl} from './utils.js';
+import {fileUrl, detailedSummaryPath} from './utils.js';
 
 export function createApi(fetcher = (...args) => fetch(...args)) {
-  const methodTexts = new Map();
-  const pendingMethods = new Map();
+  const detailedSummaryTexts = new Map();
+  const pendingDetailedSummaries = new Map();
+  async function getJson(url) {
+    const response = await fetcher(url);
+    if (!response.ok) throw new Error(`读取失败：${response.status} (${url})`);
+    return response.json();
+  }
   return {
-    async loadIndex() {
-      const response = await fetcher('/paper_index.json');
-      if (!response.ok) throw new Error(`读取失败：${response.status}`);
-      return response.json();
-    },
-    loadMethod(paper) {
+    loadPapers() { return getJson('/papers.json'); },
+    loadTaxonomy() { return getJson('/taxonomy.json'); },
+    loadDetailedSummary(paper) {
       const id = paper.paper_id;
-      if (!paper.method_document) return Promise.reject(new Error('索引未记录方法文档路径'));
-      if (methodTexts.has(id)) return Promise.resolve(methodTexts.get(id));
-      if (pendingMethods.has(id)) return pendingMethods.get(id);
-      const job = fetcher(fileUrl(paper.method_document)).then(response => {
+      if (detailedSummaryTexts.has(id)) return Promise.resolve(detailedSummaryTexts.get(id));
+      if (pendingDetailedSummaries.has(id)) return pendingDetailedSummaries.get(id);
+      const job = fetcher(fileUrl(detailedSummaryPath(paper))).then(response => {
         if (!response.ok) throw new Error(`读取失败：${response.status}`);
         return response.text();
-      }).then(text => { methodTexts.set(id, text); return text; });
-      pendingMethods.set(id, job);
-      job.then(() => pendingMethods.delete(id), () => pendingMethods.delete(id));
+      }).then(text => { detailedSummaryTexts.set(id, text); return text; });
+      pendingDetailedSummaries.set(id, job);
+      job.then(() => pendingDetailedSummaries.delete(id), () => pendingDetailedSummaries.delete(id));
       return job;
     },
-    clearMethods() { methodTexts.clear(); pendingMethods.clear(); },
+    clearDetailedSummaries() { detailedSummaryTexts.clear(); pendingDetailedSummaries.clear(); },
     async semanticSearch(query, topK, signal) {
       const response = await fetcher('/api/semantic-search', {
         method:'POST', headers:{'Content-Type':'application/json'},

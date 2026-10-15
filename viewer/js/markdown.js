@@ -1,7 +1,7 @@
 import {esc} from './utils.js';
 
-export function renderMethodMarkdown(source) {
-  if (!source) return '<p>方法文档未载入。请通过 start_viewer.bat 打开查看器。</p>';
+export function renderDetailedSummaryMarkdown(source) {
+  if (!source) return '<p>精细总结文档未载入。请在项目根目录运行 python launch.py 打开查看器。</p>';
   const formulas = [];
   const protectedText = source.replace(/(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|(?<!\\)\$(?!\$)[^\n$]+?(?<!\\)\$)/g, expression => {
     const number = formulas.push(expression) - 1;

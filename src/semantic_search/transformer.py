@@ -1,8 +1,6 @@
 import httpx
-if __package__:
-    from .config import BGE_M3_API_KEY, BGE_M3_BASE_URL, BGE_M3_MODEL
-else:
-    from config import BGE_M3_API_KEY, BGE_M3_BASE_URL, BGE_M3_MODEL
+
+from src.config import BGE_M3_API_KEY, BGE_M3_BASE_URL, BGE_M3_MODEL
 
 
 class Transformer:
