@@ -9,9 +9,10 @@ import {createSemanticSearch} from './components/semantic-search.js';
 const element = selector => document.querySelector(selector);
 const ui = {
   search:element('#search'), category:element('#category'), addedFrom:element('#added-from'),
-  addedTo:element('#added-to'), status:element('#status'), clearSemantic:element('#clear-semantic'),
+  addedTo:element('#added-to'), sortOrder:element('#sort-order'), status:element('#status'), clearSemantic:element('#clear-semantic'),
 };
-const state = {repo:null, filters:emptyFilters(), semantic:null};
+const state = {repo:null, filters:emptyFilters(), semantic:null, sortOrder:'default'};
+ui.sortOrder.value = state.sortOrder;
 const api = createApi();
 const getRepo = () => state.repo;
 const detail = createPaperDetail({dialog:element('#dialog'), container:element('#detail'), getRepo, api});
@@ -42,11 +43,14 @@ function render() {
   if (!state.repo) return;
   try {
     const {candidates, matches} = filterPapers(state.repo, state.filters, state.semantic);
+    const orderHint = state.sortOrder === 'default'
+      ? (state.semantic ? '按检索顺序' : '按分类分组')
+      : (state.sortOrder === 'added-desc' ? '按入库时间从新到旧' : '按入库时间从旧到新');
     setStatus(state.semantic
-      ? `向量检索「${state.semantic.query}」：返回 ${candidates.length} 篇，当前显示 ${matches.length} 篇（按检索顺序）`
-      : `已载入 ${state.repo.papers.length} 篇论文，当前显示 ${matches.length} 篇；打开卡片时读取对应精细总结文档`);
+      ? `向量检索「${state.semantic.query}」：返回 ${candidates.length} 篇，当前显示 ${matches.length} 篇（${orderHint}）`
+      : `已载入 ${state.repo.papers.length} 篇论文，当前显示 ${matches.length} 篇；${orderHint}；打开卡片时读取对应精细总结文档`);
     if (!matches.length) { list.showEmpty('没有找到符合条件的论文。'); return; }
-    list.render(groupPapers(matches, state.semantic), state.repo, state.semantic !== null);
+    list.render(groupPapers(matches, state.semantic, state.sortOrder), state.repo, state.semantic !== null);
   } catch (error) {
     setStatus(error.message, true); list.showEmpty('请调整入库日期范围。');
   }
@@ -54,6 +58,10 @@ function render() {
 
 ui.search.addEventListener('input', readFilters);
 ui.category.addEventListener('change', readFilters);
+ui.sortOrder.addEventListener('change', () => {
+  state.sortOrder = ui.sortOrder.value;
+  render();
+});
 ui.addedFrom.addEventListener('input', readFilters);
 ui.addedTo.addEventListener('input', readFilters);
 element('#clear-dates').addEventListener('click', () => {

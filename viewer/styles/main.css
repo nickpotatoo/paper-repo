@@ -7,7 +7,8 @@ header { max-width:1160px; margin:auto; padding:36px 24px 27px; }
 h1 { margin:5px 0 4px; font:600 clamp(27px,4vw,38px)/1.25 Georgia,"Microsoft YaHei",serif; letter-spacing:-.03em; }
 .subtitle { color:var(--muted); margin:8px 0 0; }
 main { max-width:1160px; padding:25px 24px 56px; margin:auto; }
-.toolbar { display:grid; grid-template-columns:minmax(220px,1fr) minmax(210px,300px) auto; gap:12px; align-items:center; margin-bottom:15px; }
+.toolbar { display:grid; grid-template-columns:minmax(220px,1fr) minmax(160px,230px) minmax(170px,210px) auto; gap:12px; align-items:center; margin-bottom:15px; }
+.toolbar select { min-width:0; width:100%; }
 .date-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-bottom:15px; }
 .date-filter-panel { margin-bottom:15px; }
 .date-filter-panel summary { cursor:pointer; color:var(--green); font-size:13px; font-weight:600; width:fit-content; }

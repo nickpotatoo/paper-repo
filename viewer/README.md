@@ -9,7 +9,7 @@
 | `js/app.js` | 页面入口；集中管理 repo、filters、semantic 状态；并行读取论文和分类标签，连接组件和更新结果 |
 | `js/api.js` | 分别提供 `loadPapers()`、`loadTaxonomy()`，以及 Markdown、语义搜索和心跳 HTTP 请求；按论文 ID 缓存 Markdown 和合并进行中的加载请求 |
 | `js/repo.js` | `createRepo(papers, taxonomy)` 接收两个独立参数；校验编号引用、按 ID 查询论文、解析分类标签和组合搜索文本 |
-| `js/filters.js` | 根据筛选条件计算结果；按分类 ID 排序分组；保留向量检索结果顺序 |
+| `js/filters.js` | 根据筛选条件计算结果；默认按分类 ID 分组；支持跨分类按入库时间排序，默认保留向量检索结果顺序 |
 | `js/utils.js` | HTML 转义、分类编号比较、文件 URL、北京时间日期转换 |
 | `js/markdown.js` | Markdown 及四种 LaTeX 定界符渲染 |
 | `js/components/paper-list.js` | 分组和卡片展示；通过事件委托处理单击、双击、键盘操作 |
@@ -25,6 +25,8 @@
 PDF 存放在 `data/pdfs/<分类ID>/`，例如 `data/pdfs/C003/`。论文记录仅保存 `metadata.filename`（例如 `example.pdf`）；`repo.pdfPath(paper)` 根据 `classification.primary_category` 与文件名生成路径，`pdfUrl(paper, repo)` 将它映射到 `/files/pdfs/C003/example.pdf`，路径不写回论文记录。`taxonomy.json` 的分类仅保存显示名称 `name` 和主题 `description`，目录名直接使用分类 ID。精细总结文档位于 `data/detailed_summaries/<paper_id>.md`，通过 `/files/detailed_summaries/<paper_id>.md` 读取；URL 前缀由服务端映射到 `PDFS_DIR` 和 `DETAILED_SUMMARIES_DIR`，前端不依赖其磁盘绝对路径。
 
 ## 运行与扩展
+
+工具栏的排序选项提供“默认顺序”“入库：最新优先”和“入库：最早优先”。时间排序按 `added_at` 的实际时刻跨分类排列，筛选后仍生效；相同时间保持原顺序，缺失或无效时间均放在末尾，不修改论文数组。默认顺序按分类浏览，向量检索时按相关性排列；主动选择时间排序后，检索结果按所选时间方向显示。搜索、日期筛选及返回全部论文均保留所选排序方式。
 
 在项目根目录运行 `python launch.py` 启动服务并打开浏览器，默认监听 `127.0.0.1:5000`；使用 `python launch.py --no-open-viewer` 可只启动服务，`--port 0` 可自动分配空闲端口。修改服务端代码后重启服务，修改索引或 Markdown 后刷新页面。ES Modules 需要通过 HTTP 加载，不支持直接双击 HTML 文件运行。
 

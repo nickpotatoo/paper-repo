@@ -20,6 +20,11 @@
     <div class="toolbar">
       <input id="search" type="search" placeholder="搜索编号、标题、内容或标签…" aria-label="搜索论文">
       <select id="category" aria-label="按分类筛选"><option value="">全部分类</option></select>
+      <select id="sort-order" aria-label="按入库时间排序">
+        <option value="default">默认顺序</option>
+        <option value="added-desc">入库：最新优先</option>
+        <option value="added-asc">入库：最早优先</option>
+      </select>
       <button id="open-semantic" class="action" type="button" disabled>向量检索</button>
     </div>
     <details class="date-filter-panel">
