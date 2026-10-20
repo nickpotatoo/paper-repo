@@ -36,8 +36,9 @@ if __name__ == "__main__":
     parser.add_argument("--no-open-viewer", action="store_true", help="启动服务但不自动打开浏览器")
     parser.add_argument("--without-check", action="store_true", help="跳过 repo 数据和附件目录检查")
     parser.add_argument("--port", type=int, default=5000, help="指定服务端口，默认 5000")
+    parser.add_argument("-s", "--auto-shutdown", action="store_false", help="长时间无请求则自动关闭服务")
     args = parser.parse_args()
     if not args.without_check:
         check_repo_data()
         check_attachment_dirs()
-    server.launch(open_browser=not args.no_open_viewer, port=args.port)
+    server.launch(open_browser=not args.no_open_viewer, port=args.port, auto_shutdown=args.auto_shutdown)

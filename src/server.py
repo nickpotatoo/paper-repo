@@ -30,6 +30,7 @@ def launch(
     state_path: Path | None = None,
     viewer_dir: Path | None = None,
     open_browser: bool = True,
+    auto_shutdown: bool = True,
     *,
     validate: bool = True,
     port: int | None = None,
@@ -199,7 +200,7 @@ def launch(
         if open_browser:
             webbrowser.open(url)
         # Heartbeats keep the service alive; stop after ten minutes without requests.
-        while time.monotonic() - last_request < 600:
+        while time.monotonic() - last_request < 600 or not auto_shutdown:
             server.handle_request()
     except KeyboardInterrupt:
         pass
