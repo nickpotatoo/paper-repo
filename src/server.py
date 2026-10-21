@@ -191,11 +191,11 @@ def launch(
         def log_message(self, format: str, *args: object) -> None:
             pass
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port or 0), Handler)
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", port or 0), Handler)
     server.timeout = 30
     server.daemon_threads = True
     try:
-        url = f"http://127.0.0.1:{server.server_port}/"
+        url = f"http://0.0.0.0:{server.server_port}/"
         print(url, flush=True)
         if open_browser:
             webbrowser.open(url)
