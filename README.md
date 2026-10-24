@@ -11,7 +11,7 @@ python -m pip install -r requirements.txt
 python launch.py
 ```
 
-启动后自动打开浏览器。数据位于 `data/`，配置见 `src/config.py`；嵌入向量服务默认使用硅基流动平台`BGE_M3`模型，需设置环境变量 `BGE_M3_API_KEY`，普通浏览无需密钥。
+首次启动自动初始化空资料库并打开浏览器。数据位于 `data/`，配置见 `src/config.py`；嵌入向量服务默认使用硅基流动平台`BGE_M3`模型，需设置环境变量 `BGE_M3_API_KEY`，普通浏览无需密钥。
 
 ## 文档
 

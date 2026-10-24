@@ -1,10 +1,3 @@
-"""读取 repo 数据；致命错误抛异常，其余校验结果返回为描述列表。
-
-致命错误：读取/解析失败、不可处理的结构、编号无效或重复、
-无效计数器及不安全路径。内容、引用及附件缺失等问题收集后继续校验。
-validate=False 跳过校验；不缓存、不写入、不生成聚合索引。
-"""
-
 import json
 import re
 from datetime import datetime, timedelta
@@ -12,10 +5,41 @@ from os import PathLike
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from src.config import PAPERS_PATH, TAXONOMY_PATH, REPO_STATE_PATH, PDFS_DIR, DETAILED_SUMMARIES_DIR
+from src.config import DATA_DIR, PAPERS_PATH, TAXONOMY_PATH, REPO_STATE_PATH, PDFS_DIR, DETAILED_SUMMARIES_DIR, VECTOR_DATA_DIR
+from src.template import _papers_template, _taxonomy_template, _repo_state_template
 
-__all__ = ["load_papers", "load_taxonomy", "load_state", "validate_data", "load_data"]
+__all__ = ["init_data", "load_papers", "load_taxonomy", "load_state", "validate_data", "load_data"]
 JsonPath = str | PathLike[str]
+
+
+def init_data() -> None:
+    """按配置初始化空资料库，不覆盖已有文件或补建部分缺失的 JSON。"""
+    sources = (
+        (Path(PAPERS_PATH), _papers_template),
+        (Path(TAXONOMY_PATH), _taxonomy_template),
+        (Path(REPO_STATE_PATH), _repo_state_template),
+    )
+    existing = [path.exists() for path, _ in sources]
+    if any(existing) and not all(existing):
+        missing = ", ".join(str(path) for (path, _), exists in zip(sources, existing) if not exists)
+        raise ValueError(f"repo 数据文件不完整，缺少：{missing}")
+    directories = tuple(Path(path) for path in (DATA_DIR, PDFS_DIR, DETAILED_SUMMARIES_DIR, VECTOR_DATA_DIR))
+    if not any(existing):
+        for directory in directories:
+            if directory.exists() and not directory.is_dir():
+                raise ValueError(f"资料目录不是文件夹：{directory}")
+            if directory.exists() and any(
+                path.is_file()
+                for path in directory.rglob("*")
+            ):
+                raise ValueError("已有资料但缺少 repo 数据文件，请先恢复配置，不能创建空资料库")
+        for path, content in sources:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("x", encoding="utf-8", newline="\n") as target:
+                json.dump(content, target, ensure_ascii=False, indent=2)
+                target.write("\n")
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
 
 
 def _read_json(path: JsonPath) -> Any:

@@ -159,6 +159,7 @@ errors = repo["errors"]
 `hash_file()`、`hash_text()`、`hash_bytes()` 返回 SHA-256。`compare_hash(path=...)` 可直接计算并查询；同时传入 `digest` 和 `path` 时优先使用 `digest`。哈希相同只能证明字节相同，不能代替来源核对。
 
 - `load_papers()`、`load_taxonomy()`、`load_state()` 返回 `(data, errors)`，默认只校验单文件结构；不接受 `errors` 参数。
+- `init_data()` 按配置显式初始化空资料库：仅在三个 JSON 均不存在且资料目录中没有任何文件时创建空模板及附件目录，允许空目录存在；部分 JSON 缺失时报错，不覆盖已有文件。启动器默认调用它，读取接口不会自动初始化；不要用它修复丢失的资料。
 - `validate_data(papers, taxonomy, state, root=None)` 返回关联及附件问题列表；`load_data()` 返回含 `papers`、`taxonomy`、`repo_state`、`errors` 的字典，默认执行完整校验。
 - 无问题返回空列表。无法读取/解析、不可处理的结构、无效或重复 ID、落后的计数器、不安全路径等会抛异常；内容、引用、时间、哈希格式或附件缺失等可能仅返回问题描述。两种情况都必须处理。
 - 完整校验检查所有分类目录、PDF、Markdown 是否存在，但不重新计算 PDF 哈希，也不能代替原文和总结质量检查。不提供 `check_files` 参数。
