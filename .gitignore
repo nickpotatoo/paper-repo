@@ -11,6 +11,7 @@
 !/vendor/**
 !/viewer/**
 !/launch.py
+!/requirements.txt
 !/src/**
 !/data/README.md
 

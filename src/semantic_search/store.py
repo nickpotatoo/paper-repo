@@ -1,131 +1,174 @@
+"""Coordinate embedding, cached vector search and storage under one operation lock."""
+
 import json
-import os
-import re
 import threading
-from pathlib import Path
+from copy import deepcopy
+from dataclasses import dataclass
+
 import numpy as np
 
-from src.config import VECTOR_DATA_DIR, VECTOR_MAX_ROWS, CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
-from .transformer import Transformer
+from src.config import TOP_K, VECTOR_DTYPE, COSINE_EPSILON
+from .chunking import build_embedding_inputs
+from .embed_client import EmbedClient
+from .jsonl_storage import JsonlStorage, FileSignature, ShardFiles
 
 
-def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    if len(text) <= size:
-        return [text]
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + size
-        chunks.append(text[start:end])
-        if end >= len(text):
-            break
-        start = end - overlap
-    return chunks
+def _metadata_key(metadata: dict) -> str:
+    return json.dumps(metadata, sort_keys=True, ensure_ascii=False)
+
+
+@dataclass(frozen=True)
+class _SearchSnapshot:
+    signature: FileSignature
+    vectors: np.ndarray
+    norms: np.ndarray
+    metadata: tuple[dict, ...]
+    metadata_keys: tuple[str, ...]
 
 
 class VectorStore:
-    def __init__(self, transformer: Transformer, vectors_dir=None):
-        self.transformer = transformer
-        self.vectors_dir = os.fspath(vectors_dir or VECTOR_DATA_DIR)
-        if type(VECTOR_MAX_ROWS) is not int or VECTOR_MAX_ROWS <= 0:
-            raise ValueError("VECTOR_MAX_ROWS 必须为正整数")
-        self.max_rows = VECTOR_MAX_ROWS
-        self._write_lock = threading.Lock()
+    def __init__(self, vectors_dir=None):
+        self._storage = JsonlStorage(vectors_dir)
+        self._lock = threading.RLock()
+        self._closed = False
+        self._metadata_keys: set[str] | None = None
+        self._metadata_signature: FileSignature | None = None
+        self._search_snapshot: _SearchSnapshot | None = None
+        # Create the client last, after all other initialization can succeed.
+        self._embed_client = EmbedClient()
 
-    def _vector_files(self) -> list[tuple[int, Path]]:
-        """按编号列出 vectors_1.jsonl 起的分片，不读取其他文件。"""
-        base = Path(self.vectors_dir)
-        pattern = re.compile(r"vectors_([1-9][0-9]*)\.jsonl")
-        if not base.exists():
-            return []
-        files = []
-        for path in base.iterdir():
-            match = pattern.fullmatch(path.name)
-            if match and path.is_file():
-                files.append((int(match.group(1)), path))
-        return sorted(files, key=lambda item: item[0])
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("VectorStore 已关闭，请创建新的实例")
 
-    def _read_records(self):
-        for _, path in self._vector_files():
-            with path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        yield json.loads(line)
+    def close(self) -> None:
+        """Wait for operations, clear caches and close the owned EmbedClient."""
+        with self._lock:
+            self._closed = True
+            self._invalidate_caches()
+            self._embed_client.close()
+
+    # Private cache helpers run under the public save/retrieve/close operation lock.
+    def _invalidate_caches(self) -> None:
+        self._metadata_keys = None
+        self._metadata_signature = None
+        self._search_snapshot = None
+
+    def _storage_state(self) -> tuple[ShardFiles, FileSignature]:
+        """Use one policy to invalidate both caches when files change."""
+        try:
+            files = self._storage.files()
+            signature = self._storage.signature(files)
+        except Exception:
+            self._invalidate_caches()
+            raise
+        if self._metadata_signature is not None and self._metadata_signature != signature:
+            self._metadata_keys = None
+            self._metadata_signature = None
+        if self._search_snapshot is not None and self._search_snapshot.signature != signature:
+            self._search_snapshot = None
+        return files, signature
+
+    def _read_consistent_records(self, files: ShardFiles, signature: FileSignature):
+        """Caller holds _lock; parsing and signature failures invalidate once."""
+        try:
+            yield from self._storage.read_records(files)
+            if self._storage.signature() != signature:
+                raise RuntimeError("向量文件在读取期间发生变化，请重试")
+        except Exception:
+            self._invalidate_caches()
+            raise
 
     def _load_metadata_keys(self) -> set[str]:
-        """逐行读取已有记录，返回用于去重的 metadata 键集合。"""
-        return {
-            json.dumps(record["metadata"], sort_keys=True, ensure_ascii=False)
-            for record in self._read_records()
-        }
+        """Caller holds _lock; keep metadata loading separate from matrix loading."""
+        files, signature = self._storage_state()
+        if self._metadata_keys is None:
+            self._metadata_keys = {
+                _metadata_key(record["metadata"])
+                for record in self._read_consistent_records(files, signature)
+            }
+            self._metadata_signature = signature
+        return self._metadata_keys
 
-    def _append_vectors(self, vectors: list[list[float]], metadata: dict) -> None:
-        base = Path(self.vectors_dir)
-        base.mkdir(parents=True, exist_ok=True)
-        files = self._vector_files()
-        file_index, path = files[-1] if files else (1, base / "vectors_1.jsonl")
-        rows = 0
-        if path.exists():
-            with path.open("rb") as source:
-                rows = sum(1 for _ in source)
-        offset = 0
-        while offset < len(vectors):
-            if rows >= self.max_rows:
-                file_index += 1
-                path = base / f"vectors_{file_index}.jsonl"
-                rows = 0
-            batch = vectors[offset:offset + self.max_rows - rows]
-            # 已有末行没有换行符时，先补齐，避免两条 JSON 粘在同一行。
-            needs_newline = False
-            if rows:
-                with path.open("rb") as source:
-                    source.seek(-1, os.SEEK_END)
-                    needs_newline = source.read(1) != b"\n"
-            with path.open("a", encoding="utf-8", newline="\n") as target:
-                if needs_newline:
-                    target.write("\n")
-                for vector in batch:
-                    record = {"vector": vector, "metadata": metadata}
-                    target.write(json.dumps(record, ensure_ascii=False) + "\n")
-            offset += len(batch)
-            rows += len(batch)
+    def _get_search_snapshot(self) -> _SearchSnapshot:
+        """Caller holds _lock; build or reuse a complete read-only snapshot."""
+        files, signature = self._storage_state()
+        if self._search_snapshot is not None:
+            return self._search_snapshot
+        records = list(self._read_consistent_records(files, signature))
+        vectors = (
+            np.array([record["vector"] for record in records], dtype=VECTOR_DTYPE)
+            if records else np.empty((0, 0), dtype=VECTOR_DTYPE)
+        )
+        if vectors.ndim != 2 or (records and vectors.shape[1] == 0) or not np.isfinite(vectors).all():
+            raise ValueError("向量必须为维度一致的非空有限数值数组")
+        norms = np.linalg.norm(vectors, axis=1)
+        if not np.isfinite(norms).all():
+            raise ValueError("本地向量范数溢出，请检查数值或计算精度")
+        vectors.setflags(write=False)
+        norms.setflags(write=False)
+        metadata = tuple(record["metadata"] for record in records)
+        keys = tuple(_metadata_key(item) for item in metadata)
+        snapshot = _SearchSnapshot(signature, vectors, norms, metadata, keys)
+        self._metadata_keys = set(keys)
+        self._metadata_signature = signature
+        self._search_snapshot = snapshot
+        return snapshot
 
-    def save(self, text: str, metadata: dict) -> bool:
-        """文本仅用于嵌入；保存 vector 和调用方传入的原始 metadata。"""
-        with self._write_lock:
-            meta_key = json.dumps(metadata, sort_keys=True, ensure_ascii=False)
+    def save(self, text: str, metadata: dict, *, context: str = "") -> bool:
+        """Store only vectors and caller-supplied metadata, never embedding text."""
+        if not isinstance(context, str):
+            raise TypeError("context 必须为字符串")
+        with self._lock:
+            self._ensure_open()
+            metadata = deepcopy(metadata)
+            meta_key = _metadata_key(metadata)
             if meta_key in self._load_metadata_keys():
                 return False
-            chunks = chunk_text(text)
-            vectors = self.transformer.embed(chunks)
-            if len(vectors) != len(chunks):
-                raise ValueError("嵌入返回数量与文本分块数量不一致，未写入向量")
-            self._append_vectors(vectors, metadata)
+            inputs = build_embedding_inputs(text, context=context)
+            # EmbedClient validates the response before any disk write.
+            vectors = self._embed_client.embed(inputs)
+            if self._storage.signature() != self._metadata_signature:
+                if meta_key in self._load_metadata_keys():
+                    return False
+            # Cache maintenance is not a transaction or crash recovery mechanism.
+            try:
+                self._storage.append(vectors, metadata)
+                signature = self._storage.signature()
+            except Exception:
+                self._invalidate_caches()
+                raise
+            self._metadata_keys.add(meta_key)
+            self._metadata_signature = signature
+            self._search_snapshot = None
         return True
 
     def retrieve(self, query: str, top_k: int = TOP_K) -> list[dict]:
-        records = list(self._read_records())
-        if not records:
+        with self._lock:
+            self._ensure_open()
+            return self._retrieve(query, top_k)
+
+    def _retrieve(self, query: str, top_k: int) -> list[dict]:
+        snapshot = self._get_search_snapshot()
+        if not snapshot.metadata:
             return []
-        query_vector = self.transformer.embed_one(query)
-
-        vectors = np.array([r["vector"] for r in records])
-        query_vec = np.array(query_vector)
-
-        norms = np.linalg.norm(vectors, axis=1) * np.linalg.norm(query_vec)
-        similarities = np.dot(vectors, query_vec) / np.where(norms == 0, 1e-10, norms)
-
+        query_vec = np.asarray(self._embed_client.embed_one(query), dtype=VECTOR_DTYPE)
+        if query_vec.ndim != 1 or query_vec.shape[0] != snapshot.vectors.shape[1] or not np.isfinite(query_vec).all():
+            raise ValueError("查询向量与本地向量维度不一致或包含无效数值")
+        query_norm = np.linalg.norm(query_vec)
+        if not np.isfinite(query_norm):
+            raise ValueError("查询向量范数溢出，请检查数值或计算精度")
+        norms = snapshot.norms * query_norm
+        similarities = np.dot(snapshot.vectors, query_vec) / np.where(norms == 0, COSINE_EPSILON, norms)
         top_indices = np.argsort(similarities)[::-1]
-
         seen = set()
         results = []
         for idx in top_indices:
             if len(results) >= top_k:
                 break
-            metadata = records[idx]["metadata"]
-            meta_key = json.dumps(metadata, sort_keys=True, ensure_ascii=False)
+            meta_key = snapshot.metadata_keys[idx]
             if meta_key in seen:
                 continue
             seen.add(meta_key)
-            results.append({"metadata": metadata, "score": float(similarities[idx])})
+            results.append({"metadata": deepcopy(snapshot.metadata[idx]), "score": float(similarities[idx])})
         return results

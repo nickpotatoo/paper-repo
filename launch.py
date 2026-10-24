@@ -2,6 +2,7 @@ import argparse
 import json
 
 from src import server, template
+from src import config
 from src.config import DATA_DIR, PAPERS_PATH, TAXONOMY_PATH, REPO_STATE_PATH, PDFS_DIR, DETAILED_SUMMARIES_DIR
 
 
@@ -33,10 +34,10 @@ def check_attachment_dirs():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="论文资料库查看器")
-    parser.add_argument("--no-open-viewer", action="store_true", help="启动服务但不自动打开浏览器")
+    parser.add_argument("--no-open-viewer", action="store_true", default=not config.OPEN_BROWSER, help="启动服务但不自动打开浏览器")
     parser.add_argument("--without-check", action="store_true", help="跳过 repo 数据和附件目录检查")
-    parser.add_argument("--port", type=int, default=5000, help="指定服务端口，默认 5000")
-    parser.add_argument("-s", "--auto-shutdown", action="store_false", help="长时间无请求则自动关闭服务")
+    parser.add_argument("--port", type=int, default=config.SERVER_PORT, help=f"指定服务端口，默认 {config.SERVER_PORT}")
+    parser.add_argument("-s", "--auto-shutdown", action="store_false", default=config.AUTO_SHUTDOWN, help="关闭长时间无请求后的自动退出")
     args = parser.parse_args()
     if not args.without_check:
         check_repo_data()

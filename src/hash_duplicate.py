@@ -3,7 +3,7 @@ from os import PathLike
 from pathlib import Path
 import hashlib
 
-from src.config import PAPERS_PATH
+from src.config import PAPERS_PATH, HASH_CHUNK_SIZE
 
 __all__ = ["hash_bytes", "hash_text", "hash_file", "compare_hash"]
 
@@ -25,7 +25,7 @@ def hash_text(text: str, *, encoding: str = "utf-8") -> str:
 
 
 def hash_file(
-    path: str | PathLike[str], *, chunk_size: int = 1024 * 1024
+    path: str | PathLike[str], *, chunk_size: int = HASH_CHUNK_SIZE
 ) -> str:
     """按块读取文件并计算原始内容的 SHA-256，默认每块 1 MiB。
 

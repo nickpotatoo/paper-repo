@@ -1,0 +1,7 @@
+fastapi>=0.162,<1.0
+uvicorn>=0.54,<1.0
+
+# Semantic search and local environment configuration.
+numpy>=1.26
+httpx>=0.27,<1.0
+python-dotenv>=1.0,<2.0
