@@ -12,7 +12,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -82,12 +82,11 @@ def _read_repo_json(
 
 
 def _serve_file(root: Path, relative_path: str) -> Response:
-    """Apply the same path, MIME, cache and error policy to every file route."""
+    """Validate file paths and delegate file transfer to FileResponse."""
     file = inside(root, relative_path)
     try:
         if file is None or not file.is_file():
             return _file_error(404)
-        content = file.read_bytes()
     except FileNotFoundError:
         return _file_error(404)
     except OSError:
@@ -97,7 +96,7 @@ def _serve_file(root: Path, relative_path: str) -> Response:
         content_type = "text/javascript"
     if file.suffix.lower() in (".html", ".json", ".md", ".js", ".css"):
         content_type += "; charset=utf-8"
-    return Response(content, headers={"Content-Type": content_type, **HTTP_RESPONSE_HEADERS})
+    return FileResponse(file, media_type=content_type, headers=HTTP_RESPONSE_HEADERS)
 
 
 async def _parse_search_request(request: Request) -> tuple[str, int]:

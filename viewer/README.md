@@ -34,7 +34,7 @@ PDF 存放在 `data/pdfs/<分类ID>/`，例如 `data/pdfs/C003/`。论文记录�
 
 模块边界：`src/server.py` 只负责端口绑定、Uvicorn 启动与浏览器打开，通过 `routes.create_app(...)` 获取应用。`src/routes.py` 负责应用创建、启动资料校验、HTTP 路由、请求/响应适配及 HTTP 活动计时，将数据读取转发给 `src.load_data`，语义检索转发给 semantic_search 提供的服务句柄。PaperVectorService 的延迟创建、生命周期锁与关闭都在 `src/semantic_search/lifecycle.py` 内部；存储操作锁仍由 VectorStore 管理。routes 只在应用 lifespan 接入 `paper_vector_service_lifespan(...)`，不直接创建或关闭服务。入口仍为 `python launch.py`。
 
-`routes.py` 内部分工：`create_app()` 组装应用并接入模块生命周期；`_AppRuntime` 只记录 HTTP 请求活动与空闲计时，请求计数持续到响应发送完成。`create_router()` 分别注册 JSON、页面、心跳、静态资源、PDF、精细总结及搜索路由，未知路径兜底放在末尾。`_read_repo_json()` 统一数据读取和错误映射，`_serve_file()` 统一安全路径、文件读取、MIME 与响应头，`_parse_search_request()` 负责受限正文读取及搜索参数校验。检索通过当前服务句柄转发；路由层不持有服务锁、不调用 close、不访问内部存储或 HTTP 客户端。校验描述和检索失败类型通过模块 logger 输出，后者不记录查询正文、密钥或上游响应。
+`routes.py` 内部分工：`create_app()` 组装应用并接入模块生命周期；`_AppRuntime` 只记录 HTTP 请求活动与空闲计时，请求计数持续到响应发送完成。`create_router()` 分别注册 JSON、页面、心跳、静态资源、PDF、精细总结及搜索路由，未知路径兜底放在末尾。`_read_repo_json()` 统一数据读取和错误映射，`_serve_file()` 校验安全路径和文件存在性，设置 MIME 与响应头，并通过 `FileResponse` 发送文件，避免预先将整个文件读入内存；`_parse_search_request()` 负责受限正文读取及搜索参数校验。检索通过当前服务句柄转发；路由层不持有服务锁、不调用 close、不访问内部存储或 HTTP 客户端。校验描述和检索失败类型通过模块 logger 输出，后者不记录查询正文、密钥或上游响应。
 
 ### HTTP 接口兼容
 
