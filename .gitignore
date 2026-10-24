@@ -6,6 +6,7 @@
 # 需要追踪的文件和路径
 !/.gitignore
 !/AGENTS.md
+!/readme.md
 !/LICENSE
 !/paper_viewer.html
 !/vendor/**
@@ -13,7 +14,6 @@
 !/launch.py
 !/requirements.txt
 !/src/**
-!/data/README.md
 
 # 明确排除的资料与本地配置（优先于上方白名单）
 *.[pP][dD][fF]
