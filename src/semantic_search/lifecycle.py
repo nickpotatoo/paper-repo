@@ -28,8 +28,11 @@ class _LazyPaperVectorService:
                 self._service = PaperVectorService(**self._options)
             return self._service
 
-    def retrieve(self, query: str, top_k: int = TOP_K) -> list[str]:
-        return self._get_service().retrieve(query, top_k=top_k)
+    def retrieve_document(self, query: str, top_k: int = TOP_K) -> list[str]:
+        return self._get_service().retrieve_document(query, top_k=top_k)
+
+    def retrieve_chunk(self, query: str, top_k: int = TOP_K) -> list[dict]:
+        return self._get_service().retrieve_chunk(query, top_k=top_k)
 
     def create_vector(self, index: str | None = None):
         return self._get_service().create_vector(index=index)

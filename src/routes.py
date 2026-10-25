@@ -266,7 +266,7 @@ def create_app(
         service = app.state.paper_vector_service
         if service is None:
             raise RuntimeError("论文向量服务尚未启动或已关闭")
-        return service.retrieve(query, top_k=top_k)
+        return service.retrieve_document(query, top_k=top_k)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

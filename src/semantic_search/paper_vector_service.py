@@ -99,13 +99,20 @@ class PaperVectorService:
         for paper in papers:
             content = self._build_text(paper)
             metadata = self._build_metadata(paper)
-            saved = self._store.save(content, metadata, context=self._build_context(paper))
+            saved = self._store.save(
+                content, metadata, document_id=paper.paper_id, context=self._build_context(paper),
+            )
             results.append({"paper_id": paper.paper_id, "saved": saved})
         return results
     
-    def retrieve(self, query:str, top_k:int = TOP_K) -> list[str]:
-        """在论文向量库中根据query进行检索\nquery：检索内容，会被自动处理成向量\ntop_k"""
+    def retrieve_document(self, query: str, top_k: int = TOP_K) -> list[str]:
+        """按相关度返回去重后的论文编号。"""
         self._ensure_open()
         return list(dict.fromkeys(
-            result["metadata"]["index"] for result in self._store.retrieve(query, top_k)
+            result["metadata"]["index"] for result in self._store.retrieve_document(query, top_k)
         ))
+
+    def retrieve_chunk(self, query: str, top_k: int = TOP_K) -> list[dict]:
+        """返回 top_k 分块的 text、论文 metadata 和 score，不按论文合并。"""
+        self._ensure_open()
+        return self._store.retrieve_chunk(query, top_k)

@@ -14,7 +14,7 @@ data/
   repo_state.json                       # 论文编号计数器
   pdfs/<category_id>/<filename>.pdf      # PDF 按主分类编号存放
   detailed_summaries/<paper_id>.md       # 每篇论文独立的中文精细总结
-  vectors/vectors_1.jsonl                # 向量分片，从 1 开始递增
+  vectors/<paper_id>.json                # 每篇论文的 metadata、分块文本和向量
 ```
 
 - JSON 和 Markdown 使用 UTF-8。JSON 字段使用英文 snake_case；概述、精细总结、分类名称与描述、标签和文献类型名称使用中文，通用专业缩写可保留。
@@ -170,7 +170,7 @@ errors = repo["errors"]
 
 ### 新论文生成
 
-新增论文必须在资料完整后调用公开的论文向量服务；不要直接调用 VectorStore、EmbedClient 或手工追加 JSONL。通常使用默认配置，批量任务共用一个上下文：
+新增论文必须在资料完整后调用公开的论文向量服务；不要直接调用 VectorStore、EmbedClient 或手工写入向量 JSON。通常使用默认配置，批量任务共用一个上下文：
 
 ```python
 from src.semantic_search.paper_vector_service import PaperVectorService
@@ -184,19 +184,24 @@ with PaperVectorService() as service:
 
 `index` 是稳定论文编号；省略或传 `None` 会处理全部论文，新增任务不要误用全库生成。自定义资料位置时，可传 `papers_path`、`taxonomy_path`、`detailed_summaries_dir`、`vectors_dir`，确保属于同一资料库。
 
+检索通过 `service.retrieve_document(query, top_k=...)` 返回论文编号列表，原 `retrieve()` 已改名；需要检索具体片段时调用 `service.retrieve_chunk(query, top_k=...)`，返回按相似度降序排列的分块列表，每项包含 `text`、对应论文 `metadata` 和 `score`。分块检索不按论文合并，同篇可返回多个分块；text 包含嵌入时的上下文前缀。两种检索都要求 top_k 为正整数，不自动生成资料向量。
+
 生成会读取概述与精细总结正文，并为每个分块附加标题、中文文献类型和中文标签上下文，然后发送给配置的嵌入服务。默认服务为 SiliconFlow，具体地址、模型、密钥和分块参数以 `src/config.py` 及环境变量为准；用户要求不外发或暂不生成时不能调用。缺少密钥、资料校验失败、总结缺失或为空时明确报错，不退化为只嵌入概述。
 
-返回值是结果列表，必须包含目标编号：`saved=True` 表示保存调用完成；`saved=False` 表示发现相同 metadata 而跳过，不表示正文已更新；空列表不表示成功。失败时记录具体编号与原因，不宣称已经可检索。
+返回值是结果列表，必须包含目标编号：`saved=True` 表示创建、同步保存成功，或内容完全相同而无需写入；内容未变时不生成向量、不写文件、不递增 revision。`saved=False` 表示 JSON 写入失败，应结合日志核对；空列表不表示成功。失败时记录具体编号与原因，不宣称已经可检索。
 
 ### 文件格式与更新限制
 
-- 每行只保存 `vector` 和 `metadata`；metadata 仅含 `title`、`index`，其中 `index` 为 `paper_id`。不保存正文，不兼容旧 metadata 格式。
-- 向量默认存入 `data/vectors/vectors_1.jsonl`，超过 `VECTOR_MAX_ROWS` 后追加新数字分片；当前默认每片 500 个物理行，一篇论文可跨分片。检索和判重读取全部匹配分片，不只读取首片。
-- 判重比较 `title` 与 `index`，概述、总结、标签、文献类型或分块配置变化不会触发重建；标题变化可能追加同编号的新记录。检索按论文编号去重，返回数量可能少于请求值。
-- 当前没有自动更新、删除、跨进程写锁或事务恢复接口。写入中断可能留下部分记录，不能仅凭已有 metadata 或 `saved=False` 判断论文分块完整。不要多个进程同时写同一组分片。
-- 更新正文、嵌入上下文、模型或清理删除论文时，应先明确重建范围，保留旧分片备份，在新的 `vectors_dir` 建立完整新库，核对后切换配置；不能只替换首片，也不要直接向原库混入同篇新旧向量。用户未授权重建时先报告待更新项。
+- 每篇论文保存到 `data/vectors/<paper_id>.json`，顶层为 `revision`、`metadata` 和非空 `chunks` 数组；metadata 仅含 `title`、`index`，其中 `index` 为稳定的 `paper_id`。每个 chunk 保存 `text`、`text_hash`、`revision` 和 `vector`，`text` 是实际送入模型的完整文本，包含论文上下文前缀。
+- `text_hash` 为完整 text 的 UTF-8 SHA-256，使用现有哈希接口，不规范化空白或换行。新文档主 `revision` 初始为 `1`，后续每批 JSON 实际修改前加一；本批新增或变化的 chunk 使用当前主 revision，复用 chunk 保留原版本。仅修改 metadata、删除分块或调整顺序也递增主版本，完全不变则不写入、不递增。由 VectorStore 组装文档、计算哈希、管理版本、校验内容及展开分块，JsonStorage 仅负责安全文件定位与 JSON 读写、原子替换。不手工伪造哈希，也不兼容缺少这些字段的向量文件。
+- 不再使用按行数分片的配置；只读取新格式 `.json` 文件，不兼容、转换或读取旧 JSONL。修改存储代码不代表已生成新向量，旧文件可保留备份，但不会出现在新检索结果中。
+- 保存时按论文编号定位文件，按当前完整嵌入文本的 `text_hash` 复用已有向量，只生成新增哈希的向量，移除当前已不存在的分块。同次保存内重复哈希只生成并保留一份，按文本首次出现顺序排列；不跨论文判重。修改概述、总结、标签、文献类型或分块参数后，再次按编号调用生成即可同步；metadata 相同也必须检查文本哈希。
+- `VectorStore.save(..., remove_stale_chunks=True)` 可配置旧分块清理，默认开启以保持上述同步行为；设为 False 时保留全部旧分块及其顺序，只追加新增哈希分块，旧分块仍参与检索。没有实际修改时不写入、不递增 revision；论文服务当前使用默认值，整理任务不要绕过论文服务直接调用 store。
+- 新增分块生成并与复用分块一起校验后写入同目录临时文件，通过替换一次发布整篇 JSON；失败不会提前删除旧分块或将半篇 JSON 当作完成。当前没有跨进程写锁、多论文事务、后台自动同步或整篇删除接口，不要多个进程同时写同一资料库。
+- JsonStorage 提供 `delete(document_id)` 文件删除接口。JSON 写入异常时，store 统一调用删除接口清理对应 JSON，包括原有同名文件；清理完成后返回 False 并记录警告。删除失败继续抛异常；嵌入或内容校验失败不删除旧文件。这里没有提供论文服务级删除接口。
+- 切换嵌入模型或清理已删除论文时，先明确重建范围并备份，在新的 `vectors_dir` 建立完整新库，核对后切换配置；文本哈希不包含模型标识，不能用哈希相同或 `saved=True` 证明模型已更新。用户未授权重建时先报告待更新项。
 
-使用 `with PaperVectorService(...)` 或在 `finally` 调用 `close()` 释放资源。生命周期逐层管理：路由 → lifecycle 代理 → PaperVectorService → VectorStore → EmbedClient / JsonlStorage；VectorStore 在操作锁内关闭自己持有的客户端，上层不跨层访问。关闭后需新建实例，不自动重连。实现和中断恢复设计见 [src/semantic_search/README.md](src/semantic_search/README.md)。
+使用 `with PaperVectorService(...)` 或在 `finally` 调用 `close()` 释放资源。生命周期逐层管理：路由 → lifecycle 代理 → PaperVectorService → VectorStore → EmbedClient / JsonStorage；VectorStore 在操作锁内关闭自己持有的客户端，上层不跨层访问。关闭后需新建实例，不自动重连。实现说明见 [src/semantic_search/README.md](src/semantic_search/README.md)。
 
 ## 8. 环境与交付边界
 

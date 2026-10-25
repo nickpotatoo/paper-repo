@@ -66,9 +66,7 @@ EMBED_REQUEST_TIMEOUT_SECONDS = 30.0  # HTTPX 超时时长，单位为秒。
 
 # ── 向量分块、存储与计算 ────────────────────────────────────────
 VECTOR_DATA_DIR = Path(os.environ.get("SEMANTIC_SEARCH_DATA_DIR") or DATA_DIR / "vectors")
-VECTOR_MAX_ROWS = 500               # 每个 JSONL 分片的最大物理行数，不是论文数量。
-VECTOR_FILE_PREFIX = "vectors"      # 文件为 vectors_1.jsonl 起；修改前须迁移已有文件。
-VECTOR_FILE_SUFFIX = ".jsonl"
+# 每篇论文保存为 <paper_id>.json，包含 metadata 和各分块 text、vector，不再按行数分片。
 CHUNK_SIZE = 512                    # 正文块的字符数，不含上下文前缀，也不是 token 数。
 CHUNK_OVERLAP = 64                  # 相邻正文块重叠字符数；必须小于 CHUNK_SIZE。
 VECTOR_DTYPE = "float64"            # 内存矩阵与查询向量的数据类型，保持原计算精度。

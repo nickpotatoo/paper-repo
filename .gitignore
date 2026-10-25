@@ -30,3 +30,4 @@ __pycache__/
 .env
 .env.*
 /追踪清单.txt
+docs.txt
