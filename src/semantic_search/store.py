@@ -1,4 +1,4 @@
-"""Coordinate embedding, direct vector search and storage under one operation lock."""
+"""在同一操作锁内协调嵌入、直接向量检索及存储。"""
 
 import logging
 import math
@@ -21,7 +21,7 @@ class VectorStore:
         self._storage = JsonStorage(vectors_dir)
         self._lock = threading.RLock()
         self._closed = False
-        # Create the client last, after all other initialization can succeed.
+        # 最后创建客户端，确保此前的其他初始化步骤均已成功。
         self._embed_client = EmbedClient()
 
     def _ensure_open(self) -> None:
@@ -29,7 +29,7 @@ class VectorStore:
             raise RuntimeError("VectorStore 已关闭，请创建新的实例")
 
     def close(self) -> None:
-        """Wait for operations and close the owned EmbedClient."""
+        """等待正在进行的操作完成，并关闭自身持有的 EmbedClient。"""
         with self._lock:
             self._closed = True
             self._embed_client.close()
@@ -73,7 +73,7 @@ class VectorStore:
         self, text: str, metadata: dict, *, document_id: str, context: str = "",
         remove_stale_chunks: bool = True,
     ) -> bool:
-        """Synchronize chunks by text hash, embedding only newly encountered text."""
+        """按文本哈希同步分块，仅为新增文本生成嵌入向量。"""
         if type(remove_stale_chunks) is not bool:
             raise TypeError("remove_stale_chunks 必须为布尔值")
         with self._lock:
@@ -98,7 +98,7 @@ class VectorStore:
             missing_hashes = [text_hash for text_hash in inputs if text_hash not in stored_chunks]
             generated_vectors = {}
             if missing_hashes:
-                # Generate everything before replacing the file or removing stale chunks.
+                # 先完成全部向量生成，再替换文件或移除过期分块。
                 new_vectors = self._embed_client.embed([inputs[text_hash] for text_hash in missing_hashes])
                 generated_vectors = dict(zip(missing_hashes, new_vectors))
             document = {
@@ -124,7 +124,7 @@ class VectorStore:
         return True
 
     def _search(self, query: str, top_k: int) -> tuple[list[dict], np.ndarray]:
-        """Caller holds _lock; load current JSON files and score their chunks."""
+        """调用方须持有 _lock；加载当前 JSON 文件并计算各分块的相似度分数。"""
         self._ensure_open()
         if type(top_k) is not int or top_k < 1:
             raise ValueError("top_k 必须为正整数")
@@ -158,7 +158,7 @@ class VectorStore:
         return records, similarities
 
     def retrieve_document(self, query: str, top_k: int = TOP_K) -> list[dict]:
-        """Return document metadata and the highest matching chunk score per document."""
+        """返回各文档的元数据及其匹配分块中的最高分数。"""
         with self._lock:
             records, similarities = self._search(query, top_k)
             top_indices = np.argsort(similarities)[::-1]
@@ -178,7 +178,7 @@ class VectorStore:
             return results
 
     def retrieve_chunk(self, query: str, top_k: int = TOP_K) -> list[dict]:
-        """Return the highest scoring chunks without merging hits from one document."""
+        """返回分数最高的分块，不合并同一文档的命中结果。"""
         with self._lock:
             records, similarities = self._search(query, top_k)
             return [

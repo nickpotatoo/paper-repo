@@ -1,4 +1,4 @@
-"""Pure text splitting and context attachment; no IO or paper-specific fields."""
+"""仅负责文本分块和附加上下文，不进行输入输出，也不处理论文专有字段。"""
 
 from src.config import CHUNK_SIZE, CHUNK_OVERLAP
 
@@ -27,7 +27,7 @@ def build_embedding_inputs(
     text: str, *, context: str = "",
     size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP,
 ) -> list[str]:
-    """Split the body first, then prepend the same opaque context to each chunk."""
+    """先对正文分块，再为每块添加相同上下文前缀，不解析上下文内容。"""
     if not isinstance(context, str):
         raise TypeError("context 必须为字符串")
     chunks = chunk_text(text, size=size, overlap=overlap)

@@ -1,4 +1,4 @@
-"""Paper-specific loading, text construction, metadata and vector operations."""
+"""负责论文资料加载、文本构造、元数据及向量操作。"""
 
 from pathlib import Path
 
@@ -8,7 +8,7 @@ from src.load_data import load_papers, load_taxonomy
 from .store import VectorStore
 
 class PaperVectorService:
-    """agent使用论文向量库的接口"""
+    """供智能体使用论文向量库的接口。"""
     def __init__(self, papers_path=None, detailed_summaries_dir=None, vectors_dir=None, taxonomy_path=None):
         self._detailed_summaries_dir = Path(detailed_summaries_dir or DETAILED_SUMMARIES_DIR)
         self._papers_path = Path(papers_path or PAPERS_PATH)
@@ -69,7 +69,7 @@ class PaperVectorService:
         return result
 
     def _build_text(self, paper: Paper) -> str:
-        """Paper fields have already passed _load_paper validation."""
+        """论文各字段已通过 _load_paper 校验。"""
         detailed_summary_path = self._detailed_summaries_dir / f"{paper.paper_id}.md"
         detailed_summary_text = detailed_summary_path.read_text(encoding="utf-8")
         if not detailed_summary_text.strip():
@@ -87,7 +87,7 @@ class PaperVectorService:
 
     @staticmethod
     def _build_metadata(paper: Paper) -> dict:
-        """The vector-specific metadata contract belongs to this service."""
+        """向量专用的元数据约定由本服务定义。"""
         return {"title": paper.title, "index": paper.paper_id}
 
     def create_vector(self, index: str = None):

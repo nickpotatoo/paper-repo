@@ -1,4 +1,4 @@
-"""Per-document JSON IO; VectorStore owns operation locks and content logic."""
+"""按文档读写 JSON；操作锁和内容逻辑由 VectorStore 管理。"""
 
 import json
 import os
@@ -40,11 +40,11 @@ class JsonStorage:
         return document
 
     def delete(self, document_id: str) -> None:
-        """Delete the target JSON; a missing file is already deleted."""
+        """删除目标 JSON 文件；文件不存在时视为已删除。"""
         self._document_path(document_id).unlink(missing_ok=True)
 
     def write(self, document_id: str, document: dict) -> None:
-        """Serialize caller-provided JSON and atomically replace the target file."""
+        """序列化调用方提供的 JSON 数据，并原子替换目标文件。"""
         path = self._document_path(document_id)
         self.directory.mkdir(parents=True, exist_ok=True)
         temporary_path = None

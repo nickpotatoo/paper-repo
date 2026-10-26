@@ -1,4 +1,4 @@
-"""Embedding HTTP requests, response validation and connection ownership."""
+"""负责嵌入服务的 HTTP 请求、响应校验及连接管理。"""
 
 import math
 
@@ -55,7 +55,7 @@ class EmbedClient:
 
     @staticmethod
     def _parse_embeddings(payload: dict, *, expected_count: int) -> list[list[float]]:
-        """Validate the remote response and restore input order when indexes exist."""
+        """校验远程响应，并在存在索引时恢复输入顺序。"""
         if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
             raise ValueError("嵌入响应必须包含 data 数组")
         items = payload["data"]

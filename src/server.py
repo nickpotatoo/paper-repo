@@ -1,4 +1,4 @@
-"""Bind the listening socket and run Uvicorn for the viewer application."""
+"""绑定监听套接字，并通过 Uvicorn 运行查看器应用。"""
 
 import asyncio
 import socket
@@ -19,7 +19,7 @@ def launch(
     port: int | None = None,
     host: str = repo_config.SERVER_HOST,
 ) -> None:
-    """Run Uvicorn using repo paths from src.config."""
+    """使用 src.config 中的资料库路径运行 Uvicorn。"""
     app = routes.create_app(
         papers_path=repo_config.PAPERS_PATH,
         taxonomy_path=repo_config.TAXONOMY_PATH,
@@ -42,7 +42,7 @@ def launch(
         access_log=repo_config.UVICORN_ACCESS_LOG, log_level=repo_config.UVICORN_LOG_LEVEL,
     )
     server = ViewerServer(config)
-    # Hold the socket throughout startup, including when the OS picks port 0.
+    # 启动全程持有套接字；端口为 0、由操作系统自动分配时也不例外。
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         if sys.platform == "win32":
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)

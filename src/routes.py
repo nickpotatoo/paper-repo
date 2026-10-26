@@ -1,4 +1,4 @@
-"""Build the FastAPI app and forward requests to repo and search modules."""
+"""构建 FastAPI 应用，并将请求转发给资料库和检索模块。"""
 
 import asyncio
 import json
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def inside(root: Path, relative: str) -> Path | None:
-    """Reject traversal and symlinks escaping the requested root."""
+    """拒绝目录穿越及指向指定根目录之外的符号链接。"""
     try:
         root = root.resolve()
         target = (root / relative).resolve()
@@ -68,7 +68,7 @@ def _read_repo_json(
     reader: Callable, source: Path, *,
     validate: bool, report_data_validate_errors: Callable[[list[str]], None],
 ) -> Response:
-    """Read fresh repo data and consistently translate filesystem/JSON errors."""
+    """读取最新资料库数据，并统一转换文件系统及 JSON 错误。"""
     try:
         payload, errors = reader(source, validate=validate)
     except FileNotFoundError:
@@ -82,7 +82,7 @@ def _read_repo_json(
 
 
 def _serve_file(root: Path, relative_path: str) -> Response:
-    """Validate file paths and delegate file transfer to FileResponse."""
+    """校验文件路径，并交由 FileResponse 传输文件。"""
     file = inside(root, relative_path)
     try:
         if file is None or not file.is_file():
@@ -100,7 +100,7 @@ def _serve_file(root: Path, relative_path: str) -> Response:
 
 
 async def _parse_search_request(request: Request) -> tuple[str, int]:
-    """Bound the body before parsing; preserve strict types and the 400 contract."""
+    """解析前限制请求体大小，并保持严格类型校验及 400 错误响应约定。"""
     length = int(request.headers.get("Content-Length", "0"))
     if not 0 < length <= SEARCH_MAX_REQUEST_BYTES:
         raise ValueError("请求内容为空或过长")
@@ -133,7 +133,7 @@ def create_router(
     semantic_search: Callable[[str, int], list[str]],
     report_data_validate_errors: Callable[[list[str]], None],
 ) -> APIRouter:
-    """Register explicit endpoints before the unknown-path fallbacks."""
+    """先注册明确的接口，再注册未知路径的兜底路由。"""
     router = APIRouter()
 
     @router.post("/api/semantic-search")
@@ -145,7 +145,7 @@ def create_router(
         try:
             ids = await run_in_threadpool(semantic_search, query, top_k)
         except Exception as error:
-            # Do not log request text, API keys, or raw upstream responses.
+            # 不记录请求正文、API 密钥或上游原始响应。
             logger.warning("语义检索失败：%s", type(error).__name__)
             message = str(error) if isinstance(error, (ImportError, RuntimeError)) else "检索失败，请检查向量文件及嵌入服务配置"
             return _json_response(503, {"error": message})
@@ -200,7 +200,7 @@ def create_router(
 
 
 class _AppRuntime:
-    """Track HTTP request activity; vector lifecycle belongs to semantic_search."""
+    """跟踪 HTTP 请求活动；向量服务的生命周期由 semantic_search 管理。"""
     def __init__(self) -> None:
         self.last_request = time.monotonic()
         self.active_requests = 0
@@ -214,7 +214,7 @@ class _AppRuntime:
 
 
 class _ActivityMiddleware:
-    """Count requests through response completion, including file downloads."""
+    """统计尚未完成响应的请求，文件下载也计入其中。"""
     def __init__(self, app: ASGIApp, runtime: _AppRuntime) -> None:
         self.app = app
         self.runtime = runtime
@@ -243,10 +243,10 @@ def create_app(
     on_idle: Callable[[], None] | None = None,
     idle_timeout: float = IDLE_TIMEOUT_SECONDS,
 ) -> FastAPI:
-    """Assemble validation, runtime, lifecycle and routes without starting Uvicorn.
+    """组装校验、运行状态、生命周期及路由，不启动 Uvicorn。
 
-    Startup association validation is always enforced. validate only controls
-    per-request validation; JSON sources are still reread for every request.
+    启动时始终执行关联校验。validate 仅控制每次请求的校验；
+    每次请求仍会重新读取 JSON 源文件。
     """
     papers_path = Path(PAPERS_PATH if papers_path is None else papers_path).resolve(strict=True)
     taxonomy_path = Path(TAXONOMY_PATH if taxonomy_path is None else taxonomy_path).resolve(strict=True)

@@ -1,4 +1,4 @@
-"""Own lazy paper-vector service creation and cleanup without eager dependencies."""
+"""管理论文向量服务的延迟创建与清理，不提前加载依赖。"""
 
 import asyncio
 import threading
@@ -19,7 +19,7 @@ class _LazyPaperVectorService:
         self._closed = False
 
     def _get_service(self) -> "PaperVectorService":
-        # This lock only guards creation/closure. Store owns operation locking.
+        # 此锁仅保护创建和关闭；具体操作的加锁由存储层负责。
         with self._lifecycle_lock:
             if self._closed:
                 raise RuntimeError("论文向量服务已关闭")
@@ -53,10 +53,10 @@ async def paper_vector_service_lifespan(
     detailed_summaries_dir: Path | None = None,
     vectors_dir: Path | None = None,
 ):
-    """Yield a lazy service handle and close it in a worker thread on exit.
+    """提供延迟初始化的服务句柄，并在退出时通过工作线程关闭。
 
-    Each lifespan owns an independent handle. Entering it requires neither
-    embedding dependencies nor an API key; the first operation initializes them.
+    每个生命周期持有独立句柄。进入时不要求嵌入服务依赖或 API 密钥；
+    首次操作时才执行服务初始化。
     """
     service = _LazyPaperVectorService({
         "papers_path": papers_path,

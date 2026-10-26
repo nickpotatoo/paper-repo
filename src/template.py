@@ -1,4 +1,4 @@
-"""Templates for repo data files and the Paper data container."""
+"""资料库数据文件模板及 Paper 数据容器。"""
 
 
 class Paper:
