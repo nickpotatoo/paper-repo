@@ -7,6 +7,10 @@ header { max-width:1160px; margin:auto; padding:36px 24px 27px; }
 h1 { margin:5px 0 4px; font:600 clamp(27px,4vw,38px)/1.25 Georgia,"Microsoft YaHei",serif; letter-spacing:-.03em; }
 .subtitle { color:var(--muted); margin:8px 0 0; }
 main { max-width:1160px; padding:25px 24px 56px; margin:auto; }
+.site-footer { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:8px 24px; padding:20px 17px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; text-align:center; }
+.site-footer a { display:inline-flex; align-items:center; gap:5px; color:inherit; text-decoration:none; }
+.site-footer a:hover { text-decoration:underline; }
+.site-footer img { width:20px; height:20px; }
 .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) minmax(160px,230px) minmax(170px,210px) auto; gap:12px; align-items:center; margin-bottom:15px; }
 .toolbar select { min-width:0; width:100%; }
 .date-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-bottom:15px; }
