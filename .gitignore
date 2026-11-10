@@ -23,6 +23,7 @@
 /data/taxonomy.json
 /data/repo_state.json
 /data/vectors/
+/data/models/
 /src/test/
 /viewer/tests/
 __pycache__/
