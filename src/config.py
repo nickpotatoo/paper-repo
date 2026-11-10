@@ -32,6 +32,9 @@ DETAILED_SUMMARIES_DIR = Path(
 )
 VIEWER_DIR = ROOT
 
+# PDF 解析模型：首次提取按功能下载并从此处加载，不使用用户目录作为模型存储位置。
+DOCLING_MODELS_DIR = Path(os.environ.get("DOCLING_MODELS_DIR") or DATA_DIR / "models" / "docling")
+
 # ── HTTP 服务与应用默认行为 ────────────────────────────────────
 APP_TITLE = "Paper repo"            # FastAPI 应用名称，不控制 HTML 页面的标题。
 SERVER_HOST = "0.0.0.0"             # 监听全部 IPv4 网卡；仅本机使用可改为 127.0.0.1。
@@ -48,6 +51,7 @@ HTTP_RESPONSE_HEADERS = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
 }
+SERVICE_PASSWORD = os.environ.get("SERVICE_PASSWORD", "")
 
 # ── 语义检索请求限制 ────────────────────────────────────────────
 SEARCH_MAX_REQUEST_BYTES = 32768    # JSON 请求正文上限，单位为字节。
@@ -74,3 +78,9 @@ COSINE_EPSILON = 1e-10              # 余弦分母为零时的替代值；不改
 
 # ── 文件哈希 ───────────────────────────────────────────────────
 HASH_CHUNK_SIZE = 1024 * 1024       # 文件哈希每次读取 1 MiB，避免整份 PDF 进入内存。
+
+
+# ── llm client ───────────────────────────────────────────────────
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODEL_TYPE = "deepseek-flash"

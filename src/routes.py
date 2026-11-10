@@ -23,6 +23,7 @@ from src.config import (
     SEARCH_MIN_TOP_K, SEARCH_MAX_TOP_K, TOP_K,
     IDLE_TIMEOUT_SECONDS, IDLE_CHECK_INTERVAL_SECONDS,
     VALIDATE_REQUEST_DATA, AUTO_SHUTDOWN, APP_TITLE,
+    SERVICE_PASSWORD,
 )
 from src.load_data import validate_data, load_papers, load_taxonomy, load_state
 from src.semantic_search.lifecycle import paper_vector_service_lifespan
@@ -121,6 +122,15 @@ async def _parse_search_request(request: Request) -> tuple[str, int]:
     if type(top_k) is not int or not SEARCH_MIN_TOP_K <= top_k <= SEARCH_MAX_TOP_K:
         raise ValueError(f"结果数量必须是 {SEARCH_MIN_TOP_K} 至 {SEARCH_MAX_TOP_K} 的整数")
     return query.strip(), top_k
+
+
+def _verify_service_password(password: str, *, expected: str = SERVICE_PASSWORD) -> bool:
+    """验证服务密码。"""
+    if not expected:
+        return True
+    if not password or not isinstance(password, str):
+        return False
+    return password == expected
 
 
 def create_router(
