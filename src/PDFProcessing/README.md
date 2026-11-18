@@ -45,7 +45,7 @@ PyMuPDF 的 AGPL/商业许可见其官方说明，项目引入时需按实际用
 ## 接口
 
 ```python
-from src.pdf_processing import PdfProcessingService, PdfSource, ExtractOptions, PageRenderOptions
+from src.PDFProcessing import PdfProcessingService, PdfSource, ExtractOptions, PageRenderOptions
 
 service = PdfProcessingService()
 source = PdfSource(path="incoming/paper.pdf")
@@ -84,7 +84,7 @@ image = service.render_page(source, PageRenderOptions(page_number=1, dpi=144))
 在项目根目录执行：
 
 ```powershell
-python -B -m unittest discover -s src/pdf_processing/tests -p "test_*.py" -v
+python -B -m unittest discover -s src/PDFProcessing/tests -p "test_*.py" -v
 ```
 
 模型、导出、服务边界和 Docling 适配测试不下载模型；Docling 使用模拟转换结果及版本信息。PyMuPDF 集成测试在系统临时目录创建 PDF，验证页信息、文本层、整页/区域渲染及密码处理，不按依赖存在性跳过。所有测试均不访问真实论文或向量库。

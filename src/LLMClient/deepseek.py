@@ -9,11 +9,17 @@ from .model import LLMResult
 
 
 class DeepSeekClient(LLMClient):
-    def __init__(self):
+    def __init__(self, request_limit: int | None = None):
         self.client = OpenAI(
             api_key=DEEPSEEK_API_KEY,
             base_url=DEEPSEEK_BASE_URL
         )
+        self.request_limit = request_limit if request_limit is not None and request_limit > 0 else None
+        self._request_count = 0
+
+    def reset_request_count(self):
+        """重置请求计数器。"""
+        self._request_count = 0
 
     def completion(
         self, sys_prompt: str, user_prompt: str, *,
@@ -38,6 +44,11 @@ class DeepSeekClient(LLMClient):
         reasoning_effort: Literal["high", "medium", "low"],
         max_tokens: int | None, json_output: bool,
     ) -> LLMResult:
+        if self.request_limit is not None and self.request_limit > 0:
+            if self._request_count >= self.request_limit:
+                raise ValueError(f"请求次数已达上限 {self.request_limit}")
+            self._request_count += 1
+
         response = self.client.chat.completions.create(
             model=DEEPSEEK_MODEL_TYPE,
             messages=[

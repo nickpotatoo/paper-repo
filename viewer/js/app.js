@@ -5,8 +5,10 @@ import {esc} from './utils.js';
 import {createPaperList} from './components/paper-list.js';
 import {createPaperDetail} from './components/paper-detail.js';
 import {createSemanticSearch} from './components/semantic-search.js';
+import {setupUpload} from './components/upload.js';
 
 const element = selector => document.querySelector(selector);
+setupUpload();
 const ui = {
   search:element('#search'), category:element('#category'), addedFrom:element('#added-from'),
   addedTo:element('#added-to'), sortOrder:element('#sort-order'), status:element('#status'), clearSemantic:element('#clear-semantic'),

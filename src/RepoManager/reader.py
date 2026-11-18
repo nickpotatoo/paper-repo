@@ -1,3 +1,5 @@
+"""读取、初始化并校验论文库资料。"""
+
 import json
 import re
 from datetime import datetime, timedelta
@@ -154,6 +156,12 @@ def _validate_state(state: Any) -> list[str]:
         raise ValueError("repo_state.json 必须为对象")
     if type(state.get("paper_id_counter")) is not int or state["paper_id_counter"] < 0:
         raise ValueError("paper_id_counter 必须为非负整数")
+    counters = state.get("taxonomy_id_counters", {})
+    if not isinstance(counters, dict) or any(
+        prefix not in ("C", "T", "D") or type(value) is not int or value < 0
+        for prefix, value in counters.items()
+    ):
+        raise ValueError("taxonomy_id_counters 必须为 C、T、D 到非负整数的映射")
     return []
 
 

@@ -121,7 +121,7 @@ PDF 路径推导为 `PDFS_DIR / primary_category / filename`；精细总结路�
 
 ## 4. 分类、标签和文献类型维护
 
-- 分类使用 `C`、标签使用 `T`、文献类型使用 `D`，各加至少三位数字，例如 `C001`、`T017`、`D004`。新增时使用对应索引现存最大数字加一；不复用已使用的 ID。
+- 分类使用 `C`、标签使用 `T`、文献类型使用 `D`，各加至少三位数字，例如 `C001`、`T017`、`D004`。通过 `RepoManager.add_taxonomy_entry` 新增定义。它按当前索引最大编号与 `repo_state.json` 中可选的 `taxonomy_id_counters` 取较大值再加一，避免重用已删除的编号。
 - 分类允许随新主题扩充。先核对已有定义，不能准确归类时新增中文名称及清晰的主题描述，并创建同编号 PDF 目录，不强行归入近似类别。
 - 标签优先复用规范名称，避免近义重复。例如“第一视角视频”归入“第一视角”，“可穿戴”归入“可穿戴设备”，“多模态”归入“多模态记忆”。
 - 文献类型描述论文形式，例如综述或方法与实验，不代替主题分类；同篇只引用一个类型。
@@ -148,7 +148,7 @@ PDF 路径推导为 `PDFS_DIR / primary_category / filename`；精细总结路�
 
 ```python
 from src.hash_duplicate import hash_file, compare_hash
-from src.load_data import load_data
+from src.RepoManager import load_data
 
 pdf_hash = hash_file(pdf_path)
 is_duplicate = compare_hash(digest=pdf_hash)
@@ -173,7 +173,7 @@ errors = repo["errors"]
 新增论文必须在资料完整后调用公开的论文向量服务；不要直接调用 VectorStore、EmbedClient 或手工写入向量 JSON。通常使用默认配置，批量任务共用一个上下文：
 
 ```python
-from src.semantic_search.paper_vector_service import PaperVectorService
+from src.SemanticSearch.paper_vector_service import PaperVectorService
 
 paper_ids = ["P000020"]  # 替换为本次实际入库编号
 with PaperVectorService() as service:
@@ -201,7 +201,7 @@ with PaperVectorService() as service:
 - JsonStorage 提供 `delete(document_id)` 文件删除接口。JSON 写入异常时，store 统一调用删除接口清理对应 JSON，包括原有同名文件；清理完成后返回 False 并记录警告。删除失败继续抛异常；嵌入或内容校验失败不删除旧文件。这里没有提供论文服务级删除接口。
 - 切换嵌入模型或清理已删除论文时，先明确重建范围并备份，在新的 `vectors_dir` 建立完整新库，核对后切换配置；文本哈希不包含模型标识，不能用哈希相同或 `saved=True` 证明模型已更新。用户未授权重建时先报告待更新项。
 
-使用 `with PaperVectorService(...)` 或在 `finally` 调用 `close()` 释放资源。生命周期逐层管理：路由 → lifecycle 代理 → PaperVectorService → VectorStore → EmbedClient / JsonStorage；VectorStore 在操作锁内关闭自己持有的客户端，上层不跨层访问。关闭后需新建实例，不自动重连。实现说明见 [src/semantic_search/README.md](src/semantic_search/README.md)。
+使用 `with PaperVectorService(...)` 或在 `finally` 调用 `close()` 释放资源。生命周期逐层管理：路由 → lifecycle 代理 → PaperVectorService → VectorStore → EmbedClient / JsonStorage；VectorStore 在操作锁内关闭自己持有的客户端，上层不跨层访问。关闭后需新建实例，不自动重连。实现说明见 [src/SemanticSearch/README.md](src/SemanticSearch/README.md)。
 
 ## 8. 环境与交付边界
 
@@ -209,6 +209,6 @@ Python 需要 3.10 或更新版本，依赖见 `requirements.txt`。项目根目
 
 配置路径为 `Path`。`PAPERS_PATH`、`DETAILED_SUMMARIES_DIR`、`SEMANTIC_SEARCH_DATA_DIR` 环境变量可分别覆盖论文 JSON、总结目录和向量目录，彼此不会自动联动，也不改变 taxonomy、状态和 PDF 位置。环境变量优先于项目根目录及向量模块目录下的 `.env`；不要通过重新初始化空资料库覆盖既有数据。
 
-改动资料格式、路径或公开接口时，同步核对 `src/config.py`、`src/load_data.py`、`src/template.py`、向量服务、相关前端和说明文档。本文保留论文维护约定，具体服务实现、前端交互和故障恢复设计放入对应 README。
+改动资料格式、路径或公开接口时，同步核对 `src/config.py`、`src/RepoManager/`、`src/template.py`、向量服务、相关前端和说明文档。论文删除、分类索引更新和引用检查见 [RepoManager 接口](src/RepoManager/README.md)。
 
 按任务需要和用户要求决定是否测试；用户要求不测试时不运行测试。修改本指南本身无需改变论文、业务代码或向量，也不额外调用嵌入服务。交付时如实区分资料校验、测试和向量生成结果。

@@ -1,7 +1,7 @@
 import argparse
 from src import server
 from src import config
-from src.load_data import init_data
+from src.RepoManager import init_data
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@
 /data/repo_state.json
 /data/vectors/
 /data/models/
+.deleted_papers/
 /src/test/
 /viewer/tests/
 __pycache__/

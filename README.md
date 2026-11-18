@@ -17,4 +17,4 @@ python launch.py
 
 - [论文入库与维护](AGENTS.md)
 - [查看器与服务](viewer/README.md)
-- [向量检索模块](src/semantic_search/README.md)
+- [向量检索模块](src/SemanticSearch/README.md)

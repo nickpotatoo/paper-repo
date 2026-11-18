@@ -36,6 +36,15 @@
       <span class="date-hint">北京时间，包含起止日期；留空表示不限</span>
       </div>
     </details>
+    <details class="upload-panel">
+      <summary>上传论文 PDF</summary>
+      <form id="upload-form">
+        <label>PDF 文件 <input id="upload-file" type="file" accept=".pdf,application/pdf" required></label>
+        <label>服务密码 <input id="upload-password" type="password" autocomplete="off" required></label>
+        <button class="action" type="submit">上传</button>
+        <span id="upload-status" class="status" role="status" aria-live="polite"></span>
+      </form>
+    </details>
     <div id="status" class="status" role="status" aria-live="polite">正在读取论文索引…</div>
     <button id="clear-semantic" class="action" type="button" hidden>返回全部论文</button>
     <div id="results"></div>

@@ -15,6 +15,11 @@ main { max-width:1160px; padding:25px 24px 56px; margin:auto; }
 .toolbar select { min-width:0; width:100%; }
 .date-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-bottom:15px; }
 .date-filter-panel { margin-bottom:15px; }
+.upload-panel { margin-bottom:15px; }
+.upload-panel summary { cursor:pointer; color:var(--green); font-size:13px; font-weight:600; }
+.upload-panel form { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:12px; }
+.upload-panel label { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13px; }
+.upload-panel .status { margin:0; }
 .date-filter-panel summary { cursor:pointer; color:var(--green); font-size:13px; font-weight:600; width:fit-content; }
 .date-filter-panel summary:focus-visible { outline:2px solid #b7cdb9; outline-offset:4px; border-radius:3px; }
 .date-filter-panel .date-filters { margin:12px 0 0; }

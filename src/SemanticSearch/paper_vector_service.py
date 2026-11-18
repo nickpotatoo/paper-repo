@@ -4,7 +4,7 @@ from pathlib import Path
 
 from src.config import DETAILED_SUMMARIES_DIR, PAPERS_PATH, TAXONOMY_PATH, TOP_K
 from src.template import Paper
-from src.load_data import load_papers, load_taxonomy
+from src.RepoManager import load_papers, load_taxonomy
 from .store import VectorStore
 
 class PaperVectorService:

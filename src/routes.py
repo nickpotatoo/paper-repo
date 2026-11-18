@@ -1,10 +1,16 @@
 """构建 FastAPI 应用，并将请求转发给资料库和检索模块。"""
 
 import asyncio
+import base64
+import binascii
+import hmac
 import json
 import logging
 import mimetypes
 import time
+import tempfile
+import uuid
+from urllib.parse import unquote
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from html import escape
@@ -23,10 +29,10 @@ from src.config import (
     SEARCH_MIN_TOP_K, SEARCH_MAX_TOP_K, TOP_K,
     IDLE_TIMEOUT_SECONDS, IDLE_CHECK_INTERVAL_SECONDS,
     VALIDATE_REQUEST_DATA, AUTO_SHUTDOWN, APP_TITLE,
-    SERVICE_PASSWORD,
+    SERVICE_PASSWORD, NEW_PAPERS_DIR, UPLOAD_MAX_BYTES,
 )
-from src.load_data import validate_data, load_papers, load_taxonomy, load_state
-from src.semantic_search.lifecycle import paper_vector_service_lifespan
+from src.RepoManager import validate_data, load_papers, load_taxonomy, load_state
+from src.SemanticSearch.lifecycle import paper_vector_service_lifespan
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +136,7 @@ def _verify_service_password(password: str, *, expected: str = SERVICE_PASSWORD)
         return True
     if not password or not isinstance(password, str):
         return False
-    return password == expected
+    return hmac.compare_digest(password.encode('utf-8'), expected.encode('utf-8'))
 
 
 def create_router(
@@ -145,6 +151,51 @@ def create_router(
 ) -> APIRouter:
     """先注册明确的接口，再注册未知路径的兜底路由。"""
     router = APIRouter()
+
+    @router.post('/api/upload-paper')
+    async def upload_paper(request: Request) -> Response:
+        if not SERVICE_PASSWORD:
+            return _json_response(503, {'error': '服务端尚未设置上传密码'})
+        try:
+            password = base64.b64decode(request.headers.get('x-service-password', ''), validate=True).decode('utf-8')
+        except (ValueError, UnicodeError, binascii.Error):
+            return _json_response(401, {'error': '密码错误'})
+        if not _verify_service_password(password, expected=SERVICE_PASSWORD):
+            return _json_response(401, {'error': '密码错误'})
+        try:
+            name = unquote(request.headers.get('x-filename', ''), encoding='utf-8', errors='strict')
+        except (UnicodeError, ValueError):
+            return _json_response(400, {'error': '文件名无效'})
+        if (not name or len(name) > 180 or name in ('.', '..') or
+                any(c in name for c in '\\/:*?"<>|') or any(ord(c) < 32 for c in name) or
+                not name.lower().endswith('.pdf')):
+            return _json_response(400, {'error': '请选择有效的 PDF 文件'})
+        temporary = None
+        try:
+            NEW_PAPERS_DIR.mkdir(parents=True, exist_ok=True)
+            size = 0
+            prefix = bytearray()
+            with tempfile.NamedTemporaryFile(dir=NEW_PAPERS_DIR, prefix='.upload-', delete=False) as output:
+                temporary = Path(output.name)
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > UPLOAD_MAX_BYTES:
+                        return _json_response(413, {'error': '文件超过大小限制'})
+                    if len(prefix) < 1024:
+                        prefix.extend(chunk[:1024 - len(prefix)])
+                    output.write(chunk)
+            if b'%PDF-' not in prefix:
+                return _json_response(400, {'error': '文件不是有效的 PDF'})
+            saved_name = f'{uuid.uuid4().hex}-{name}'
+            temporary.replace(NEW_PAPERS_DIR / saved_name)
+            temporary = None
+            return _json_response(201, {'filename': saved_name})
+        except OSError:
+            logger.exception('保存上传文件失败')
+            return _json_response(500, {'error': '保存文件失败'})
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     @router.post("/api/semantic-search")
     async def search(request: Request) -> Response:

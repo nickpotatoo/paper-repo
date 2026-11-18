@@ -32,7 +32,7 @@ PDF 存放在 `data/pdfs/<分类ID>/`，例如 `data/pdfs/C003/`。论文记录�
 
 `src.routes.create_app(...)` 返回 FastAPI 应用，不绑定端口或打开浏览器；`src.server.launch(...)` 负责运行 Uvicorn，资料及查看器路径统一读取 `src/config.py`，不再接收路径参数。浏览器开关、自动退出、校验、端口和监听地址仍作为启动参数；`host` 可指定监听地址，例如 `host="127.0.0.1"`。自动退出由 `launch()` 向应用传入 `on_idle` 回调，连接应用空闲计时与 Uvicorn 的优雅关闭；单独托管 `create_app()` 时，宿主可通过该回调接管关闭。
 
-模块边界：`src/server.py` 只负责端口绑定、Uvicorn 启动与浏览器打开，通过 `routes.create_app(...)` 获取应用。`src/routes.py` 负责应用创建、启动资料校验、HTTP 路由、请求/响应适配及 HTTP 活动计时，将数据读取转发给 `src.load_data`，语义检索转发给 semantic_search 提供的服务句柄。PaperVectorService 的延迟创建、生命周期锁与关闭都在 `src/semantic_search/lifecycle.py` 内部；存储操作锁仍由 VectorStore 管理。routes 只在应用 lifespan 接入 `paper_vector_service_lifespan(...)`，不直接创建或关闭服务。入口仍为 `python launch.py`。
+模块边界：`src/server.py` 只负责端口绑定、Uvicorn 启动与浏览器打开，通过 `routes.create_app(...)` 获取应用。`src/routes.py` 负责应用创建、启动资料校验、HTTP 路由、请求/响应适配及 HTTP 活动计时，将数据读取转发给 `src.RepoManager`，语义检索转发给 SemanticSearch 提供的服务句柄。PaperVectorService 的延迟创建、生命周期锁与关闭都在 `src/SemanticSearch/lifecycle.py` 内部；存储操作锁仍由 VectorStore 管理。routes 只在应用 lifespan 接入 `paper_vector_service_lifespan(...)`，不直接创建或关闭服务。入口仍为 `python launch.py`。
 
 `routes.py` 内部分工：`create_app()` 组装应用并接入模块生命周期；`_AppRuntime` 只记录 HTTP 请求活动与空闲计时，请求计数持续到响应发送完成。`create_router()` 分别注册 JSON、页面、心跳、静态资源、PDF、精细总结及搜索路由，未知路径兜底放在末尾。`_read_repo_json()` 统一数据读取和错误映射，`_serve_file()` 校验安全路径和文件存在性，设置 MIME 与响应头，并通过 `FileResponse` 发送文件，避免预先将整个文件读入内存；`_parse_search_request()` 负责受限正文读取及搜索参数校验。检索通过当前服务句柄转发；路由层不持有服务锁、不调用 close、不访问内部存储或 HTTP 客户端。校验描述和检索失败类型通过模块 logger 输出，后者不记录查询正文、密钥或上游响应。
 
@@ -59,7 +59,7 @@ PDF 存放在 `data/pdfs/<分类ID>/`，例如 `data/pdfs/C003/`。论文记录�
 - 新增筛选：扩展 `emptyFilters()` 和 `filterPapers()`，在 HTML 添加输入，最后在 app 中绑定状态。
 - 新增界面功能：在 components 中创建模块，由 app 注入所需元素、数据访问函数及回调。
 - 新增服务端接口：在 `src/routes.py` 的 `create_router()` 中添加路由，具体路由放在通配路由之前；由应用层转发给相应业务模块，在前端 api 中封装调用，再供组件使用。无需修改 `src/server.py`。
-- 后端配置集中在 `src/config.py`；数据读取和校验位于 `src/load_data.py`；向量检索模块位于 `src/semantic_search/`。入口 `launch.py` 从项目根目录运行。
+- 后端配置集中在 `src/config.py`，资料读取和校验由 `src.RepoManager` 提供，向量检索模块位于 `src/SemanticSearch/`。入口 `launch.py` 从项目根目录运行。
 - 改变 JSON 格式：更新 repo 校验和访问方法；同步维护论文处理规范。界面开发说明维护在本文件。
 - 论文记录保存在 `data/papers.json`，分类标签保存在 `data/taxonomy.json`。精细总结文档的虚拟路径按 `detailed_summaries/<paper_id>.md` 推导，实际文件位于 `data/detailed_summaries/`，路径统一按论文编号推导。
 - 精细总结文档始终按需加载；向量命中通过 `paper_id` 映射记录，不使用数组下标。

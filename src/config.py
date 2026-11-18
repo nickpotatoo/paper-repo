@@ -11,7 +11,7 @@ from pathlib import Path
 # ── 项目位置与环境文件 ─────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[1]
 # 按顺序加载，均不覆盖已有变量；保留向量模块旧 .env 的加载位置。
-ENV_FILES = (ROOT / ".env", ROOT / "src" / "semantic_search" / ".env")
+ENV_FILES = (ROOT / ".env", ROOT / "src" / "SemanticSearch" / ".env")
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError as error:
@@ -23,6 +23,8 @@ else:
 
 # ── 资料与界面路径 ─────────────────────────────────────────────
 DATA_DIR = ROOT / "data"
+NEW_PAPERS_DIR = ROOT / "new_papers"
+UPLOAD_MAX_BYTES = 50 * 1024 * 1024  # 上传 PDF 最大 50 MiB；前端不预设大小。
 PAPERS_PATH = Path(os.environ.get("PAPERS_PATH") or DATA_DIR / "papers.json")
 TAXONOMY_PATH = DATA_DIR / "taxonomy.json"
 REPO_STATE_PATH = DATA_DIR / "repo_state.json"
