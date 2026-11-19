@@ -7,14 +7,13 @@ from src.RepoManager import RepoManager, load_data
 
 repo = RepoManager()
 data = load_data()
-tag_id = repo.add_taxonomy_entry("tag", "图检索")
-repo.update_taxonomy_entry("tag", tag_id, "图结构检索")
-repo.delete_taxonomy_entry("tag", tag_id)
+taxonomy = repo.get_taxonomy()
 ```
 
 - `get_paper(paper_id)` 与 `get_taxonomy()` 读取已校验的记录和索引。
-- `validate_classification(draft, taxonomy)` 校验任务中的分类、标签和文献类型引用及候选定义。候选只提交内容，正式编号由 RepoManager 在新增定义或确认入库时分配。
-- 分类索引接口接受 `category`、`tag` 或 `document_type`。新增分类须提供 `description`，并自动创建 PDF 目录。改名保留编号。仍被论文引用的定义不能删除。删除分类定义会保留磁盘上的目录。
+- `validate_classification_draft(draft, taxonomy)` 校验待审阅的分类草稿，返回错误和候选提示。
+- `ingest_paper(..., classification=draft)` 是候选转为正式定义的入口。入库时核对已有引用、复用同名定义，再为剩余候选分配编号。新分类须提供 `description`，PDF 保存到该分类编号目录。
+- `delete_taxonomy_entry(kind, entry_id)` 删除未被论文引用的定义。类型接受 `category`、`tag` 或 `document_type`。编号分配记录与分类目录会保留。
 - `delete_paper(paper_id)` 从索引及正式附件目录移除论文记录、PDF、精细总结和向量文件，返回位于论文索引同目录下 `.deleted_papers/` 的归档路径。归档保存原记录及当时存在的附件。论文计数器保持原值。
 - 管理方法在进程内串行写入，JSON 使用原子替换。论文删除涉及多个文件，遇到普通写入错误时尝试恢复附件。多进程写入和进程崩溃恢复由调用方协调。
 
