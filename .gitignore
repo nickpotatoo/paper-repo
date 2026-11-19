@@ -14,6 +14,7 @@
 !/launch.py
 !/requirements.txt
 !/src/**
+!.env.example
 
 # 明确排除的资料与本地配置（优先于上方白名单）
 *.[pP][dD][fF]
@@ -30,6 +31,6 @@
 __pycache__/
 *.py[cod]
 .env
-.env.*
 /追踪清单.txt
 docs.txt
+/task/*

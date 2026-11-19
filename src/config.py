@@ -24,6 +24,7 @@ else:
 # ── 资料与界面路径 ─────────────────────────────────────────────
 DATA_DIR = ROOT / "data"
 NEW_PAPERS_DIR = ROOT / "new_papers"
+TASKS_DIR = ROOT / "task"  # 论文处理任务及状态文件。
 UPLOAD_MAX_BYTES = 50 * 1024 * 1024  # 上传 PDF 最大 50 MiB；前端不预设大小。
 PAPERS_PATH = Path(os.environ.get("PAPERS_PATH") or DATA_DIR / "papers.json")
 TAXONOMY_PATH = DATA_DIR / "taxonomy.json"

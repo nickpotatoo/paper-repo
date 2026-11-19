@@ -6,10 +6,11 @@ METADATA = '''根据提供的论文原文提取元数据，仅输出 JSON 对象
 
 CLASSIFICATION = '''根据论文和提供的 taxonomy 分类，仅输出 JSON 对象，例如：
 {"primary_category":"C001","tags":["T001"],"document_type":"D001","proposed_categories":[],"proposed_tags":[],"proposed_document_types":[]}
-优先复用现有索引中的 ID，标签不重复；不得伪造 ID。候选数组始终存在：
-- 无法使用已有主分类时，primary_category 为 null，proposed_categories 恰好包含一个对象，含非空中文 name、description 和 reason；否则该数组为空。
+尽量复用 taxonomy 中的定义。先根据已有分类的名称和描述，以及标签的含义判断是否覆盖论文核心主题。已有定义足以表达时，必须使用其 ID，并将对应候选数组留空。不要因术语不同、粒度略有差异、作者自定义命名或论文采用了某个具体模型而新增近义或过细的条目。不得伪造 ID，候选数组始终存在。
+- 主分类选择能准确覆盖核心主题的已有分类，即使它的范围更广，此时 proposed_categories 留空。只有所有已有分类都无法准确覆盖时，primary_category 才设为 null，proposed_categories 恰好包含一个对象，含非空中文 name、description 和 reason。reason 要说明现有分类为何不适用。
+- 新主分类应是边界清晰的通用研究方向，能容纳多篇采用不同方法、数据集或应用场景的论文。名称和描述应概括共同研究问题与适用范围，避免用单篇论文的模型、方法、数据集、产品或具体应用场景命名。细粒度差异优先用已有标签表达。
 - 无法使用已有文献类型时，document_type 为 null，proposed_document_types 恰好包含一个对象，含非空中文 name 和 reason；否则该数组为空。
-- tags 只包含已有标签 ID；新增标签放在 proposed_tags 中，每项为含非空中文 name 和 reason 的对象，名称不得重复，也不得与已有标签同名。
+- tags 只包含与核心主题直接相关的已有标签 ID，去重，数量不必凑齐，没有合适标签时可以为空。已有同义、近义或上位标签足以表达时，复用其 ID。只有当某个重要、可供多篇论文复用的检索主题无法用任何现有标签表达时，才在 proposed_tags 中提出新增项。每项含非空中文 name 和 reason，reason 说明现有标签的覆盖缺口。候选不得重复或与已有标签同义，其余情况将 proposed_tags 留空。
 候选仅供审阅，不分配正式 ID。'''
 
 ROUGH_SUMMARY = '''依据提供的论文原文，为资料库撰写中文粗略总结。只输出一段正文，不要标题、列表或套用模板的字段名。

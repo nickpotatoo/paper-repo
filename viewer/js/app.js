@@ -6,6 +6,7 @@ import {createPaperList} from './components/paper-list.js';
 import {createPaperDetail} from './components/paper-detail.js';
 import {createSemanticSearch} from './components/semantic-search.js';
 import {setupUpload} from './components/upload.js';
+import {setupTasks} from './components/tasks.js';
 
 const element = selector => document.querySelector(selector);
 setupUpload();
@@ -16,6 +17,7 @@ const ui = {
 const state = {repo:null, filters:emptyFilters(), semantic:null, sortOrder:'default'};
 ui.sortOrder.value = state.sortOrder;
 const api = createApi();
+setupTasks(api, loadRepo);
 const getRepo = () => state.repo;
 const detail = createPaperDetail({dialog:element('#dialog'), container:element('#detail'), getRepo, api});
 const list = createPaperList({container:element('#results'), getRepo, onOpen:detail.show});
@@ -73,12 +75,21 @@ ui.clearSemantic.addEventListener('click', () => {
   state.semantic = null; state.filters = emptyFilters(); ui.clearSemantic.hidden = true; syncFilters(); render();
 });
 
-Promise.all([api.loadPapers(), api.loadTaxonomy()]).then(([papers, taxonomy]) => {
-  state.repo = createRepo(papers, taxonomy); api.clearDetailedSummaries();
-  ui.category.innerHTML = '<option value="">全部分类</option>' + state.repo.categories()
-    .map(([id, entry]) => `<option value="${esc(id)}" title="${esc(entry.description)}">${esc(state.repo.categoryName(id))}</option>`).join('');
-  // Preserve input typed while the data was loading.
-  readFilters(); semantic.setEnabled(true);
-}).catch(error => setStatus(`无法读取论文资料：${error.message}。请在项目根目录运行 python launch.py 后刷新页面。`, true));
+async function loadRepo() {
+  try {
+    const [papers, taxonomy] = await Promise.all([api.loadPapers(), api.loadTaxonomy()]);
+    const selected = ui.category.value;
+    state.repo = createRepo(papers, taxonomy);
+    api.clearDetailedSummaries();
+    ui.category.innerHTML = '<option value="">全部分类</option>' + state.repo.categories()
+      .map(([id, entry]) => `<option value="${esc(id)}" title="${esc(entry.description)}">${esc(state.repo.categoryName(id))}</option>`).join('');
+    if (Array.from(ui.category.options).some(option => option.value === selected)) ui.category.value = selected;
+    readFilters();
+    semantic.setEnabled(true);
+  } catch (error) {
+    setStatus(`无法读取论文资料：${error.message}。请在项目根目录运行 python launch.py 后刷新页面。`, true);
+  }
+}
+loadRepo();
 const heartbeat = setInterval(() => api.heartbeat(), 30000);
 window.addEventListener('pagehide', () => { clearInterval(heartbeat); semantic.cancel(); });

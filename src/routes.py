@@ -17,7 +17,7 @@ from html import escape
 from http import HTTPStatus
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, BackgroundTasks, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -29,12 +29,35 @@ from src.config import (
     SEARCH_MIN_TOP_K, SEARCH_MAX_TOP_K, TOP_K,
     IDLE_TIMEOUT_SECONDS, IDLE_CHECK_INTERVAL_SECONDS,
     VALIDATE_REQUEST_DATA, AUTO_SHUTDOWN, APP_TITLE,
-    SERVICE_PASSWORD, NEW_PAPERS_DIR, UPLOAD_MAX_BYTES,
+    SERVICE_PASSWORD, NEW_PAPERS_DIR, TASKS_DIR, UPLOAD_MAX_BYTES,
 )
-from src.RepoManager import validate_data, load_papers, load_taxonomy, load_state
+from src.PaperProcessing import TaskManager, UnsupportedRegenerationAction
+from src.RepoManager import (
+    validate_data, load_papers, load_taxonomy, load_state,
+)
 from src.SemanticSearch.lifecycle import paper_vector_service_lifespan
 
 logger = logging.getLogger(__name__)
+
+_TASK_CONTENTS = {
+    "pdf": ("原始 PDF", "input/source.pdf", "application/pdf"),
+    "metadata": ("论文元数据", "analysis/metadata.json", "application/json"),
+    "classification": ("分类", "analysis/classification.json", "application/json"),
+    "rough-summary": ("粗略总结", "analysis/rough_summary.txt", "text/plain"),
+    "detailed-summary": ("精细总结（Markdown）", "analysis/detailed_summary.md", "text/plain"),
+    "extracted-text": ("提取文本（Markdown）", "extraction/extracted.md", "text/plain"),
+    "validation": ("校验报告", "validation/report.json", "application/json"),
+    "duplicate-check": ("查重结果", "duplicate/result.json", "application/json"),
+    "pdf-info": ("PDF 信息", "extraction/pdf_info.json", "application/json"),
+    "quality": ("提取质量报告", "extraction/quality.json", "application/json"),
+}
+
+
+def _task_content_path(storage: TaskManager, task_id: str, relative: str) -> Path:
+    path = storage.artifact_path(task_id, relative)
+    if path != storage.root / task_id / relative or not path.is_file():
+        raise FileNotFoundError(relative)
+    return path
 
 
 def inside(root: Path, relative: str) -> Path | None:
@@ -88,7 +111,10 @@ def _read_repo_json(
     return _json_response(200, payload)
 
 
-def _serve_file(root: Path, relative_path: str) -> Response:
+def _serve_file(
+    root: Path, relative_path: str, *,
+    media_type: str | None = None, filename: str | None = None,
+) -> Response:
     """校验文件路径，并交由 FileResponse 传输文件。"""
     file = inside(root, relative_path)
     try:
@@ -98,12 +124,14 @@ def _serve_file(root: Path, relative_path: str) -> Response:
         return _file_error(404)
     except OSError:
         return _file_error(500)
-    content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
-    if file.suffix.lower() == ".js":
-        content_type = "text/javascript"
-    if file.suffix.lower() in (".html", ".json", ".md", ".js", ".css"):
-        content_type += "; charset=utf-8"
-    return FileResponse(file, media_type=content_type, headers=HTTP_RESPONSE_HEADERS)
+    if media_type is None:
+        suffix = file.suffix.lower()
+        media_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+        if suffix == ".js":
+            media_type = "text/javascript"
+        if suffix in (".html", ".json", ".md", ".js", ".css"):
+            media_type += "; charset=utf-8"
+    return FileResponse(file, media_type=media_type, filename=filename, headers=HTTP_RESPONSE_HEADERS)
 
 
 async def _parse_search_request(request: Request) -> tuple[str, int]:
@@ -139,6 +167,20 @@ def _verify_service_password(password: str, *, expected: str = SERVICE_PASSWORD)
     return hmac.compare_digest(password.encode('utf-8'), expected.encode('utf-8'))
 
 
+def _require_service_password(request: Request) -> Response | None:
+    if not SERVICE_PASSWORD:
+        return _json_response(503, {"error": "服务端尚未设置服务密码"})
+    try:
+        password = base64.b64decode(
+            request.headers.get("x-service-password", ""), validate=True,
+        ).decode("utf-8")
+    except (ValueError, UnicodeError, binascii.Error):
+        return _json_response(401, {"error": "密码错误"})
+    if not _verify_service_password(password, expected=SERVICE_PASSWORD):
+        return _json_response(401, {"error": "密码错误"})
+    return None
+
+
 def create_router(
     *,
     papers_path: Path,
@@ -148,20 +190,179 @@ def create_router(
     validate: bool,
     semantic_search: Callable[[str, int], list[str]],
     report_data_validate_errors: Callable[[list[str]], None],
+    tasks_dir: Path = TASKS_DIR,
 ) -> APIRouter:
     """先注册明确的接口，再注册未知路径的兜底路由。"""
     router = APIRouter()
+    tasks_manager = TaskManager(
+        tasks_dir, create_root=False, papers_path=papers_path, taxonomy_path=taxonomy_path,
+    )
+
+    @router.get("/api/tasks")
+    def task_statuses(request: Request) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            tasks = tasks_manager.list_tasks()
+        except (OSError, ValueError, RuntimeError) as error:
+            logger.warning("读取论文处理任务失败：%s", type(error).__name__)
+            return _json_response(500, {"error": "无法读取任务状态，请检查服务端任务目录"})
+        return _json_response(200, {"tasks": [
+            {
+                "task_id": task.task_id,
+                "status": task.status,
+                "current_stage": task.current_stage,
+                "updated_at": task.updated_at.isoformat(),
+                "source": {"original_filename": task.source.original_filename},
+                "duplicate_of": task.duplicate_of,
+                "paper_id": task.paper_id,
+                "can_ingest": task.can_ingest,
+                "stages": {
+                    name: {
+                        "status": stage.status,
+                        "wait_reason": stage.wait_reason,
+                        "error": {"message": "阶段执行失败，详情请查看服务端任务记录。"}
+                        if stage.error or stage.status == "failed" else None,
+                    }
+                    for name, stage in task.stages.items()
+                },
+            }
+            for task in tasks
+        ]})
+
+    @router.post("/api/tasks/{task_id}/ingest")
+    def ingest_task(request: Request, task_id: str) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            paper_id = tasks_manager.ingest_task(task_id)
+        except FileExistsError as error:
+            return _json_response(409, {"error": str(error)})
+        except ValueError as error:
+            return _json_response(409, {"error": str(error)})
+        except OSError as error:
+            if isinstance(error, FileNotFoundError):
+                return _json_response(404, {"error": "任务或资料库文件不存在"})
+            logger.warning("论文入库失败：%s", type(error).__name__)
+            return _json_response(500, {"error": "写入资料库失败，请检查服务端文件"})
+        return _json_response(200, {"paper_id": paper_id})
+
+    @router.post("/api/tasks/{task_id}/vector")
+    def generate_task_vector(request: Request, task_id: str) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            status = tasks_manager.generate_vector(task_id)
+        except FileNotFoundError:
+            return _json_response(404, {"error": "任务或资料库文件不存在"})
+        except ValueError as error:
+            return _json_response(409, {"error": str(error)})
+        except OSError as error:
+            logger.warning("保存向量生成状态失败：%s", type(error).__name__)
+            return _json_response(500, {"error": "无法保存向量生成状态"})
+        if status == "failed":
+            return _json_response(503, {"error": "向量生成失败，请检查嵌入服务配置后重试", "stage_status": status})
+        return _json_response(202 if status == "running" else 200, {"stage_status": status})
+
+    @router.post("/api/tasks/{task_id}/regenerate/{action}")
+    def regenerate_task(request: Request, task_id: str, action: str) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            task = tasks_manager.regenerate_task(task_id, action)
+        except UnsupportedRegenerationAction:
+            return _json_response(404, {"error": "该任务内容不支持重新生成"})
+        except FileNotFoundError:
+            return _json_response(404, {"error": "任务不存在"})
+        except ValueError as error:
+            return _json_response(409, {"error": str(error)})
+        except (ImportError, OSError, RuntimeError) as error:
+            logger.warning("任务内容重新生成失败：%s", type(error).__name__)
+            return _json_response(503, {"error": "无法重新生成任务内容，请检查服务端配置"})
+        stage = task.stages[action]
+        if stage.status != "completed":
+            return _json_response(503, {"error": "重新生成失败，请检查任务阶段或服务端日志", "stage_status": stage.status})
+        return _json_response(200, {
+            "stage_status": stage.status,
+            "updated_at": task.updated_at.isoformat(),
+        })
+
+    @router.get("/api/tasks/{task_id}/contents")
+    @router.get("/api/tasks/{task_id}/contents/{key}")
+    def task_contents(request: Request, task_id: str, key: str | None = None) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        if key is not None and key not in _TASK_CONTENTS:
+            return _json_response(404, {"error": "找不到该任务内容"})
+        try:
+            task = tasks_manager.load(task_id)
+            if key is not None:
+                _, relative, media_type = _TASK_CONTENTS[key]
+                path = _task_content_path(tasks_manager, task_id, relative)
+                filename = task.source.original_filename if key == "pdf" else None
+                if key != "pdf":
+                    media_type += "; charset=utf-8"
+                return _serve_file(path.parent, path.name, media_type=media_type, filename=filename)
+
+            contents = []
+            for content_key, (title, relative, _) in _TASK_CONTENTS.items():
+                try:
+                    _task_content_path(tasks_manager, task_id, relative)
+                except (FileNotFoundError, ValueError):
+                    continue
+                contents.append({"key": content_key, "title": title})
+            return _json_response(200, {"contents": contents})
+        except (FileNotFoundError, ValueError):
+            return _json_response(404, {"error": "任务不存在或内容尚未生成"})
+        except (OSError, RuntimeError) as error:
+            logger.warning("读取任务内容失败：%s", type(error).__name__)
+            return _json_response(500, {"error": "无法读取任务内容"})
+
+    @router.delete("/api/tasks/{task_id}")
+    def delete_task(request: Request, task_id: str) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            tasks_manager.archive_task(task_id)
+        except FileNotFoundError:
+            return _json_response(404, {"error": "任务不存在"})
+        except ValueError as error:
+            return _json_response(409, {"error": str(error)})
+        except OSError as error:
+            logger.warning("归档任务失败：%s", type(error).__name__)
+            return _json_response(500, {"error": "无法归档任务"})
+        return _json_response(200, {"task_id": task_id})
+
+    @router.post("/api/tasks/{task_id}/restart")
+    def restart_task(request: Request, task_id: str, background_tasks: BackgroundTasks) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            task = tasks_manager.restart_task(task_id)
+        except FileNotFoundError:
+            return _json_response(404, {"error": "任务或原始 PDF 不存在"})
+        except ValueError as error:
+            return _json_response(409, {"error": str(error)})
+        except (OSError, ImportError, RuntimeError) as error:
+            logger.warning("重启任务失败：%s", type(error).__name__)
+            return _json_response(503, {"error": "无法启动任务，请检查服务端配置或文件"})
+        background_tasks.add_task(tasks_manager.run_pending, task.task_id)
+        return _json_response(202, task.model_dump(
+            mode="json", include={"task_id", "status", "current_stage", "updated_at"},
+        ))
 
     @router.post('/api/upload-paper')
-    async def upload_paper(request: Request) -> Response:
-        if not SERVICE_PASSWORD:
-            return _json_response(503, {'error': '服务端尚未设置上传密码'})
-        try:
-            password = base64.b64decode(request.headers.get('x-service-password', ''), validate=True).decode('utf-8')
-        except (ValueError, UnicodeError, binascii.Error):
-            return _json_response(401, {'error': '密码错误'})
-        if not _verify_service_password(password, expected=SERVICE_PASSWORD):
-            return _json_response(401, {'error': '密码错误'})
+    async def upload_paper(request: Request, background_tasks: BackgroundTasks) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
         try:
             name = unquote(request.headers.get('x-filename', ''), encoding='utf-8', errors='strict')
         except (UnicodeError, ValueError):
@@ -187,15 +388,29 @@ def create_router(
             if b'%PDF-' not in prefix:
                 return _json_response(400, {'error': '文件不是有效的 PDF'})
             saved_name = f'{uuid.uuid4().hex}-{name}'
-            temporary.replace(NEW_PAPERS_DIR / saved_name)
+            saved_path = NEW_PAPERS_DIR / saved_name
+            temporary.replace(saved_path)
             temporary = None
-            return _json_response(201, {'filename': saved_name})
         except OSError:
             logger.exception('保存上传文件失败')
             return _json_response(500, {'error': '保存文件失败'})
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+
+        payload = {"filename": saved_name}
+        if request.headers.get("x-process-paper") == "true":
+            try:
+                task = await run_in_threadpool(tasks_manager.create_task, saved_path, original_filename=name)
+            except (ImportError, OSError, ValueError, RuntimeError) as error:
+                logger.warning("为上传论文创建任务失败：%s", type(error).__name__)
+                return _json_response(503, {
+                    **payload, "error": "PDF 已保存，但无法启动论文处理任务",
+                })
+            payload.update(task_id=task.task_id, status=task.status, current_stage=task.current_stage)
+            if task.status == "pending" and task.current_stage == "prepare":
+                background_tasks.add_task(tasks_manager.run_pending, task.task_id)
+        return _json_response(201, payload)
 
     @router.post("/api/semantic-search")
     async def search(request: Request) -> Response:

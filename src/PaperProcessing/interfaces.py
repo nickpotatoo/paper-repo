@@ -19,5 +19,9 @@ class ContentGenerator(Protocol):
     def generate_detailed_summary(self, text: str) -> str: ...
 
 
+class PaperVectorGenerator(Protocol):
+    def create_vector(self, paper_id: str, /) -> list[dict]: ...
+
+
 class StatusCallback(Protocol):
     def __call__(self, update: TaskStatusUpdate) -> None: ...

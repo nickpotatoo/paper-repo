@@ -25,7 +25,11 @@
         <option value="added-desc">入库：最新优先</option>
         <option value="added-asc">入库：最早优先</option>
       </select>
-      <button id="open-semantic" class="action" type="button" disabled>向量检索</button>
+      <div class="toolbar-actions">
+        <button id="open-semantic" class="action" type="button" disabled>向量检索</button>
+        <button id="open-upload" class="action" type="button" aria-haspopup="dialog">上传论文</button>
+        <button id="open-tasks" class="action" type="button" aria-haspopup="dialog">任务状态</button>
+      </div>
     </div>
     <details class="date-filter-panel">
       <summary>入库时间筛选</summary>
@@ -36,15 +40,6 @@
       <span class="date-hint">北京时间，包含起止日期；留空表示不限</span>
       </div>
     </details>
-    <details class="upload-panel">
-      <summary>上传论文 PDF</summary>
-      <form id="upload-form">
-        <label>PDF 文件 <input id="upload-file" type="file" accept=".pdf,application/pdf" required></label>
-        <label>服务密码 <input id="upload-password" type="password" autocomplete="off" required></label>
-        <button class="action" type="submit">上传</button>
-        <span id="upload-status" class="status" role="status" aria-live="polite"></span>
-      </form>
-    </details>
     <div id="status" class="status" role="status" aria-live="polite">正在读取论文索引…</div>
     <button id="clear-semantic" class="action" type="button" hidden>返回全部论文</button>
     <div id="results"></div>
@@ -54,6 +49,29 @@
     <a href="https://beian.mps.gov.cn/" target="_blank" rel="noopener noreferrer"><img src="https://beian.mps.gov.cn/web/assets/logo01.6189a29f.png" alt="">粤公网安备44030002019108号</a>
   </footer>
   <dialog id="dialog"><div id="detail" class="detail"></div></dialog>
+  <dialog id="upload-dialog" class="upload-dialog" aria-labelledby="upload-title" aria-describedby="upload-description">
+    <form id="upload-form">
+      <div class="upload-heading">
+        <h2 id="upload-title">上传论文</h2>
+        <p id="upload-description">上传后会启动论文处理，提取的文本将发送给已配置的大模型服务。</p>
+      </div>
+      <div class="upload-fields">
+        <div class="upload-file-box">
+          <label for="upload-file">论文 PDF</label>
+          <input id="upload-file" type="file" accept=".pdf,application/pdf" required>
+        </div>
+        <div>
+          <label for="upload-password">服务密码</label>
+          <input id="upload-password" type="password" autocomplete="off" required>
+        </div>
+        <div id="upload-status" class="status" role="status" aria-live="polite"></div>
+      </div>
+      <div class="upload-actions">
+        <button id="upload-close" class="action" type="button">关闭</button>
+        <button id="upload-submit" class="action" type="submit">上传并处理</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="semantic-dialog" class="search-dialog" aria-labelledby="semantic-title">
     <form id="semantic-form">
       <h2 id="semantic-title">向量检索</h2>
@@ -67,6 +85,64 @@
         <button id="semantic-submit" type="submit" class="action">搜索</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="tasks-dialog" class="tasks-dialog" aria-labelledby="tasks-title">
+    <div class="tasks-heading">
+      <h2 id="tasks-title">论文处理任务</h2>
+      <h2 id="task-reader-title" hidden></h2>
+      <div class="task-heading-actions">
+        <button id="close-task-reader" class="action task-secondary" type="button" hidden>返回列表</button>
+        <button id="close-tasks" class="action task-secondary" type="button">关闭</button>
+      </div>
+    </div>
+    <div id="tasks-overview">
+      <form id="tasks-form" class="tasks-actions">
+        <label for="tasks-password">服务密码</label>
+        <input id="tasks-password" type="password" autocomplete="off" required autofocus>
+        <button id="refresh-tasks" class="action" type="submit">查看任务</button>
+      </form>
+      <div id="tasks-filters" class="tasks-filters" hidden>
+        <input id="tasks-search" type="search" placeholder="搜索文件名或任务 ID" aria-label="搜索任务">
+        <select id="tasks-status-filter" aria-label="按任务状态筛选">
+          <option value="">全部状态</option>
+        </select>
+      </div>
+      <p id="tasks-status" class="status" role="status"></p>
+      <div id="tasks-list"></div>
+    </div>
+    <section id="task-reader" aria-labelledby="task-reader-title" hidden>
+      <p id="task-content-status" class="status" role="status"></p>
+      <ul id="task-content-list" class="task-content-list" aria-label="任务内容"></ul>
+    </section>
+  </dialog>
+  <dialog id="task-preview" class="task-preview" aria-labelledby="task-preview-title">
+    <div class="task-preview-heading">
+      <h2 id="task-preview-title"></h2>
+      <button id="close-task-preview" class="action task-secondary" type="button" autofocus>关闭</button>
+    </div>
+    <div id="task-preview-body" class="task-preview-body" tabindex="0">
+      <p id="task-preview-status" class="status" role="status"></p>
+      <div id="task-preview-content"></div>
+    </div>
+  </dialog>
+  <dialog id="task-ingest-dialog" class="search-dialog task-ingest-dialog" aria-labelledby="task-ingest-title" aria-describedby="task-ingest-description">
+    <h2 id="task-ingest-title">确认论文入库</h2>
+    <p id="task-ingest-filename"></p>
+    <p id="task-ingest-description">确认后将保存 PDF、论文记录和精细总结，并采纳任务中建议新增的分类、标签及文献类型。</p>
+    <p id="task-ingest-status" class="status" role="status"></p>
+    <div class="search-actions">
+      <button id="cancel-task-ingest" class="action task-secondary" type="button" autofocus>取消</button>
+      <button id="confirm-task-ingest" class="action" type="button">确认入库</button>
+    </div>
+  </dialog>
+  <dialog id="task-manage-dialog" class="search-dialog" aria-labelledby="task-manage-title" aria-describedby="task-manage-description">
+    <h2 id="task-manage-title"></h2>
+    <p id="task-manage-description"></p>
+    <p id="task-manage-status" class="status" role="status"></p>
+    <div class="search-actions">
+      <button id="cancel-task-manage" class="action task-secondary" type="button" autofocus>取消</button>
+      <button id="confirm-task-manage" class="action" type="button">确认</button>
+    </div>
   </dialog>
   <script type="module" src="./viewer/js/app.js"></script>
 </body>

@@ -12,8 +12,8 @@
 
 需要建模一个状态数据结构，用于传递给回调函数，向前端更新任务状态
 
-由用户自行决定是否入库，入库与向量生成不由本workflow进行，交由更上层的代码进行
-分类、粗略总结、精细总结可被重新生成，即新增三个状态，只有在 review 状态下才可进入，它们执行完后也直接进入 review 状态
+由用户分别触发正式入库和向量生成。阶段处理器读取待入库草稿，并负责向量生成及结果校验。任务管理器记录阶段状态，正式库由 RepoManager 写入。
+元数据、分类、粗略总结和精细总结可在待审阅时重新生成，执行完毕后返回审阅。
 
 新论文处理分以下几个阶段
 - 检查论文是否有对应task
@@ -26,9 +26,7 @@
 - 生成精细总结
 - 校验待入库的论文草稿、分类候选、PDF 和精细总结
 - 由用户自行决定是否入库，确定是否要重新生成某个内容
-（以下不为workflow状态）
-- 入库
-- 入向量库
+- 用户确认入库后由 RepoManager 标记审阅完成，进入 `vectorize` 阶段，等待用户生成向量
 
 ## 阶段细节
 
@@ -42,12 +40,13 @@
 | `rough_summary` | 基于原文生成非空中文粗略总结，说明问题、贡献和范围，记录内容缺失限制；最终对应论文记录的 `summary` 字段。 |
 | `detailed_summary` | 生成独立中文精细总结 Markdown，覆盖方法流程、实验和局限等，支持 LaTeX，尽量注明页码或章节；内容必须基于论文。 |
 | `validate` | 校验任务草稿的元数据、分类引用或候选定义、PDF 哈希与精细总结；生成问题列表。全部阻断问题解决后提交用户审阅。此时尚无正式论文编号和入库时间，不能直接把现有正式库完整校验当作草稿校验。 |
-| `review` | 展示草稿与校验结果，用户可选择接受、重新生成分类、概述或精细总结，或暂停。接受后流水线完成并返回草稿；是否入库由上层另行决定。 |
+| `review` | 展示草稿与校验结果，用户可接受、重新生成指定内容或暂停。接受后返回草稿，是否入库由上层决定。 |
+| `regenerate_metadata` | 基于当前提取文本重新生成标题、作者、年份等元数据并校验。 |
 | `regenerate_classification` | 仅从 `review` 进入；重新生成并校验分类候选，成功后更新分类产物与草稿校验报告，直接返回 `review`。 |
 | `regenerate_rough_summary` | 仅从 `review` 进入；重新生成并校验粗略总结，成功后更新对应产物与草稿校验报告，直接返回 `review`。 |
 | `regenerate_detailed_summary` | 仅从 `review` 进入；重新生成并校验精细总结，成功后更新对应产物与草稿校验报告，直接返回 `review`。 |
 
-初次处理按 `prepare → deduplicate → extract → metadata → classify → rough_summary → detailed_summary → validate → review` 顺序执行。`review` 接受对应用户操作后转入三个重新生成状态之一；这些状态执行完成直接返回 `review`，不会重新运行初次生成阶段，也不会进入独立的 `validate` 状态。更新校验报告作为重新生成状态内部步骤执行；如有阻断问题，返回 `review` 展示问题并禁止接受草稿，用户可再次重新生成或暂停。
+初次处理按 `prepare → deduplicate → extract → metadata → classify → rough_summary → detailed_summary → validate → review` 顺序执行。重新生成由待审阅任务发起，更新该阶段产物与校验报告，随后返回 `review`。任务内容列表为元数据、分类、粗略总结和精细总结分别提供重生成按钮。
 
 分类、标签和文献类型 ID 均来自正式 taxonomy；候选新增定义先确认、分配 ID 并保存后才能被正式记录引用。LLM 输出需校验字段、引用与截断，不编造信息。外发内容遵循用户授权；不将 API 密钥或 PDF 密码写入任务。
 
@@ -101,6 +100,7 @@ tasks/<task_id>/
     "detailed_summary": {"status": "pending", "attempts": 0, "started_at": null, "finished_at": null, "artifacts": [], "error": null, "wait_reason": null},
     "validate": {"status": "pending", "attempts": 0, "started_at": null, "finished_at": null, "artifacts": [], "error": null, "wait_reason": null},
     "review": {"status": "pending", "attempts": 0, "started_at": null, "finished_at": null, "artifacts": [], "error": null, "wait_reason": null},
+    "vectorize": {"status": "pending", "attempts": 0, "started_at": null, "finished_at": null, "artifacts": [], "error": null, "wait_reason": null},
     "regenerate_classification": {"status": "pending", "attempts": 0, "started_at": null, "finished_at": null, "artifacts": [], "error": null, "wait_reason": null},
     "regenerate_rough_summary": {"status": "pending", "attempts": 0, "started_at": null, "finished_at": null, "artifacts": [], "error": null, "wait_reason": null},
     "regenerate_detailed_summary": {"status": "pending", "attempts": 0, "started_at": null, "finished_at": null, "artifacts": [], "error": null, "wait_reason": null}
@@ -121,19 +121,21 @@ tasks/<task_id>/
 ## 断点与回退
 
 - 阶段产物先写临时文件、校验并发布，再原子更新 task 状态；失败或等待时退出循环，不无限重试。异常退出遗留的 `running` 阶段须核对，不能自动视为成功。
-- 用户在 `review` 发起的三个重新生成操作仅更新目标产物，不触发线性阶段回退；旧版本保存在 history。其他阶段如需回退，需另行设计入口及依赖失效规则。
-- 单个 task 同时只允许一个执行者。流水线完成后输出经审阅的草稿和产物路径；入库及向量生成由上层单独管理。上层入库前需重新检查重复、分类引用和文件冲突，按照 `AGENTS.md` 预留编号、写入及校验；向量失败由上层记录和重试，不改变流水线完成状态。
+- 用户在 `review` 发起的重新生成操作仅更新目标产物与校验报告，旧版本保存在 history。
+- 单个 task 同时只允许一个执行者。`PaperWorkflow.run()` 执行到审阅。正式入库成功后，任务进入 `vectorize`。用户触发时，任务管理器调用 `StageHandlers.execute("vectorize", task)` 并记录结果。阶段处理器读取对应资料库，复用应用提供的向量服务。向量失败时任务停在该阶段，成功后任务完成。
 
 ## 代码模块设计
 
-以下为建议的最小划分，尚未实现；沿用现有 `src/PaperProcessing` 目录名称。
+网页的「上传并处理」调用 `POST /api/upload-paper`，带服务密码和 `X-Process-Paper: true`。上传成功后，服务按 PDF 哈希创建或复用任务，返回 `task_id`、`status` 和 `current_stage`。尚未启动的任务在响应后执行，可在「任务状态」中刷新查看。后台执行由当前服务进程负责。请求未指定处理时沿用单纯保存 PDF 的上传行为。
+
+流水线按以下职责划分。PaperProcessing 管理任务模型和任务文件，RepoManager 管理正式资料库。
 
 ```text
 src/PaperProcessing/
   __init__.py        # 暴露上层使用的入口和数据类型
-  models.py          # 任务、阶段、产物索引及回调数据结构
+  models.py          # 任务、审阅操作及草稿校验模型
+  task_manager.py    # 任务调度、状态持久化和产物读写
   workflow.py        # 状态循环、状态转移和审阅命令
-  storage.py         # task 目录和产物的读取、暂存及原子发布
   stages.py          # 阶段处理函数，调用 PDF、查重和内容生成能力
   validation.py      # 待入库草稿及生成结果校验
   interfaces.py      # PDF 提取、内容生成器与状态回调的协议
@@ -141,16 +143,16 @@ src/PaperProcessing/
 
 | 模块 | 职责 |
 | --- | --- |
-| `models.py` | 定义阶段与任务状态、`Task`、阶段记录、`TaskStatusUpdate` 和草稿校验结果；与 `task.json` 一一对应，区分任务状态和当前阶段。 |
-| `workflow.py` | 向上提供创建、运行或恢复任务、获取状态及提交审阅操作的入口；检查合法转移，驱动对应阶段，持久化状态后调用回调。审阅等待和失败时结束本次循环。 |
-| `storage.py` | 管理单个 task 的路径、JSON 和阶段产物，提供暂存、发布、归档和读取；负责路径边界和文件写入，不决定状态转移或调用模型。 |
+| `models.py` | 定义任务与阶段记录、状态快照、审阅操作及草稿校验结果。 |
+| `workflow.py` | 检查状态转移并执行阶段，将状态变化交给 TaskManager。审阅等待和失败时结束本次循环。 |
+| `task_manager.py` | 对外提供任务创建、运行、状态读取、重新生成及归档入口，管理任务文件。 |
 | `stages.py` | 实现查重、PDF 提取、元数据、分类、粗略总结、精细总结等阶段；依赖现有哈希、资料读取、PDF 服务以及注入的内容生成器。初次生成和重新生成共享生成函数，由 workflow 决定下一状态。 |
 | `validation.py` | 校验尚未入库的草稿、分类引用及候选定义，产生结构化问题列表；重新生成后复用同一校验能力更新报告。 |
 | `interfaces.py` | 定义 PDF 内容提取、内容生成器及状态回调的接口，使 workflow 不依赖特定 PDF 后端、LLM 或前端推送方式。 |
 
-调用方向为：上层 → `workflow` → 阶段处理 / 校验 / 任务存储；阶段处理通过现有模块或注入的接口获取能力。上层负责用户交互与回调转发；流水线不调用路由、正式入库或向量服务。状态转移集中在 `workflow.py`，阶段函数返回结果和问题，不自行切换状态；`storage.py` 不承担业务校验。
+调用路径为上层 → `TaskManager` → `PaperWorkflow` → 阶段处理与校验。工作流通过 TaskManager 读写任务文件。
 
-入口可先设计为 `create_task(source)`、`run(task_id)`、`get_status(task_id)` 和 `submit_review(task_id, action)`；其中 `action` 限制为接受、重新生成分类、概述、精细总结或取消。`run` 执行到审阅等待、失败或终态即返回；审阅命令仅在 `review` 等待时接受，重新生成完成后返回等待。具体参数、异常和锁实现待开发时确定。
+调用方通过 `TaskManager.create_task(source)` 创建任务，通过 `run_task(task_id)` 执行，通过 `get_status(task_id)` 查询。待审阅且未入库时可调用 `regenerate_task(task_id, action)`，完成后返回待审阅。
 
 ## 模块内部接口草案
 
@@ -158,8 +160,7 @@ src/PaperProcessing/
 
 ### `models.py`
 
-- `Task`：对应 `task.json`，包含来源、阶段记录及状态；`StageRecord` 保存状态、次数、时间、产物和问题。
-- `TaskStatusUpdate`：供回调使用的已持久化状态快照；`ReviewAction` 限定接受、三种重新生成和取消。
+- `ReviewAction` 限定接受、重新生成元数据、分类、粗略总结、精细总结和取消。`Task`、阶段记录及回调快照由 `RepoManager` 定义。
 - `StageResult`：阶段执行结果，包含 `outcome`（`completed`、`waiting` 或 `duplicate`）、已暂存产物、问题及可选的重复论文 ID；不包含下一状态。
 - `ValidationReport`：结构化问题列表，每项包含代码、说明、严重程度和可选字段或来源；提供 `has_blocking_issues`，表示存在阻断问题。
 - `PaperDraft`：待审阅的元数据、分类、概述、精细总结及 PDF 引用；允许新增分类等候选定义，不能当作已入库记录。
@@ -168,29 +169,28 @@ src/PaperProcessing/
 
 ```python
 class PaperWorkflow:
-    def create_task(self, source: Path) -> Task: ...
-    def run(self, task_id: str) -> Task: ...
-    def get_status(self, task_id: str) -> TaskStatusUpdate: ...
-    def submit_review(self, task_id: str, action: ReviewAction) -> Task: ...
+    def run(self, task: Task) -> Task: ...
+    def submit_review(self, task: Task, action: ReviewAction) -> Task: ...
 ```
 
-构造时注入任务存储、阶段处理器和可选状态回调。`create_task` 先按源文件哈希检查已有任务，有匹配时返回该任务，不再创建；否则建立任务并复制 PDF。`run` 从持久化状态恢复，运行至等待、失败、重复或完成后返回。`submit_review` 只接受处于 `review` 等待状态的任务：接受时检查当前报告无阻断问题；重新生成时持久化转移并执行至返回审阅；取消进入终态。任务不存在、状态不允许操作或并发执行冲突时报告明确错误。状态持久化成功后才发回调。
+TaskManager 加载任务并将其交给工作流，通过同步的 `on_transition` 处理每次状态变化。TaskManager 更新时间并保存 `task.json`，保存成功后才发送状态快照。`run` 运行至等待、失败、重复或完成后返回，`submit_review` 执行待审阅任务的操作。
 
-### `storage.py`
+### `PaperProcessing.TaskManager`
 
 ```python
-class TaskStorage:
+class TaskManager:
+    def create_task(self, source: Path) -> Task: ...
+    def artifact_path(self, task_id: str, path: str = "") -> Path: ...
     def find_by_source_hash(self, sha256: str) -> list[str]: ...
     def create(self, task: Task, source: Path) -> None: ...
     def load(self, task_id: str) -> Task: ...
     def save(self, task: Task) -> None: ...
     def read_artifact(self, task_id: str, path: ArtifactPath) -> bytes: ...
-    def stage_artifact(self, task_id: str, path: ArtifactPath, data: bytes) -> ArtifactPath: ...
-    def publish_artifact(self, task_id: str, staged: ArtifactPath, target: ArtifactPath) -> None: ...
-    def archive_artifact(self, task_id: str, path: ArtifactPath, attempt: int) -> ArtifactPath: ...
+    def publish_artifacts(self, task_id: str, outputs: dict[str, str]) -> None: ...
+    def publish_regeneration(self, task_id: str, outputs: dict[str, str], attempt: int, report_text: str) -> None: ...
 ```
 
-`find_by_source_hash` 返回匹配任务 ID，调用方处理多个匹配；`create` 不覆盖现有任务。`stage_artifact` 写入任务内临时位置，`publish_artifact` 原子替换单个文件，`archive_artifact` 保存旧版本。所有读写均限制在任务目录内，状态文件通过 `save` 原子写入；这些接口不保证多个文件整体原子提交，恢复和协调由 workflow 负责。
+`find_by_source_hash` 返回匹配任务 ID，调用方处理多个匹配。`create` 不覆盖现有任务。工作流决定何时发布，TaskManager 写入临时文件并原子替换单个文件。`publish_regeneration` 先归档旧产物，再发布新产物与校验报告，发布异常时恢复已替换的草稿。所有读写均限制在任务目录内。多文件发布仍可能在进程中断时部分完成。
 
 ### `stages.py`
 
@@ -205,7 +205,7 @@ class StageHandlers:
     def detailed_summary(self, task: Task) -> StageResult: ...
 ```
 
-处理器读取必要输入、调用依赖并暂存产物，将结果交给 workflow；不修改 `task.json` 或自行推进阶段。三个重新生成状态分别复用 `classify`、`rough_summary`、`detailed_summary`，由 workflow 保留旧版本、协调发布和刷新报告后直接返回 `review`。`validate` 和 `review` 分别由校验模块与 workflow 处理，不需要额外生成函数。
+处理器读取必要输入、调用依赖并将结果交给 workflow。重新生成状态分别复用 `metadata`、`classify`、`rough_summary` 和 `detailed_summary`。workflow 归档旧版本、协调发布和刷新报告，之后返回 `review`。
 
 ### `validation.py`
 

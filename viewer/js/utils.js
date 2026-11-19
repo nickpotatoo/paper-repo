@@ -1,6 +1,11 @@
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 export const compareCategoryIds = (a, b) => a.localeCompare(b, 'en', {numeric:true});
 
+export function encodeServicePassword(password) {
+  const bytes = new TextEncoder().encode(password);
+  return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''));
+}
+
 export function fileUrl(path) {
   const segments = path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
   return new URL(segments, new URL('/files/', location.href)).href;
