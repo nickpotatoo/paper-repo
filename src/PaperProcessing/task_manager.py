@@ -11,94 +11,174 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from src.config import PAPERS_PATH, REPO_STATE_PATH, TAXONOMY_PATH
+from src.RepoManager import RepoManager
 from src.hash_duplicate import hash_file
 from . import taxonomy_buffer
-from .models import StageRecord, Task, TaskSource, TaskStatusUpdate
+from .models import (
+    REGENERATION_STAGES,
+    StageResult, Task, TaskAction, TaskSource, TaskStatusUpdate,
+)
+from .validation import VALIDATION_ARTIFACT
+from .workflow import RUNNABLE_STAGES, PaperWorkflow
 
 
-TASK_OPERATION_LOCK = threading.RLock()
+_TASK_OPERATION_LOCK = threading.RLock()
 _TASK_CREATION_LOCK = threading.RLock()
-_ACTIVE_VECTOR_TASKS: set[tuple[Path, str]] = set()
 logger = logging.getLogger(__name__)
-
-
-class UnsupportedRegenerationAction(ValueError):
-    """请求的操作不属于重生成阶段。"""
 
 
 class TaskManager:
     def __init__(
         self, root: Path, *, create_root: bool = True,
         papers_path: Path | None = None, taxonomy_path: Path | None = None,
+        state_path: Path | None = None,
         callback: Callable[[TaskStatusUpdate], None] | None = None,
     ):
         self.root = Path(root).resolve()
-        self.papers_path = papers_path
-        self.taxonomy_path = taxonomy_path
+        self.repo = RepoManager(
+            papers_path=PAPERS_PATH if papers_path is None else papers_path,
+            taxonomy_path=TAXONOMY_PATH if taxonomy_path is None else taxonomy_path,
+            state_path=REPO_STATE_PATH if state_path is None else state_path,
+        )
         self.callback = callback
         if create_root:
             self.root.mkdir(parents=True, exist_ok=True)
 
-    def _workflow(self):
-        from .stages import StageHandlers
-        from .workflow import PaperWorkflow
-
-        handlers = StageHandlers(self, papers_path=self.papers_path, taxonomy_path=self.taxonomy_path)
-        return PaperWorkflow(self, handlers, on_transition=self._record_workflow_transition)
-
-    def _record_workflow_transition(self, task: Task) -> None:
-        task.updated_at = datetime.now(timezone(timedelta(hours=8))).replace(microsecond=0)
-        self.save(task)
-        if self.callback is not None:
-            try:
-                self.callback(TaskStatusUpdate.from_task(task))
-            except Exception:
-                logger.exception("任务状态回调失败")
-
-    def run_task(self, task_id: str) -> Task:
-        with TASK_OPERATION_LOCK:
-            task = self.load(task_id)
-            try:
-                workflow = self._workflow()
-            except (ImportError, OSError, RuntimeError) as error:
-                if task.status in ("pending", "failed") and task.current_stage in task.stages and task.current_stage != "vectorize":
-                    logger.warning("任务工作流启动失败：%s", type(error).__name__)
-                    now = datetime.now(timezone(timedelta(hours=8))).replace(microsecond=0)
-                    stage = task.stages[task.current_stage]
-                    stage.status = "failed"
-                    stage.finished_at = now
-                    stage.error = {"code": type(error).__name__, "message": "无法启动论文处理工作流"}
-                    task.status = "failed"
-                    task.updated_at = now
-                    self.save(task)
-                    return task
-                raise
-            return workflow.run(task)
-
-    def run_pending(self, task_id: str) -> Task | None:
-        """执行排队中的新任务。对已执行或已归档的任务跳过调度。"""
-        with TASK_OPERATION_LOCK:
-            try:
-                task = self.load(task_id)
-            except FileNotFoundError:
-                return None
-            if task.status == "pending" and task.current_stage == "prepare":
-                return self.run_task(task_id)
+    def create_task(self, source: Path, *, original_filename: str | None = None) -> Task:
+        """按 PDF 内容创建任务，或返回已有任务。"""
+        source = Path(source)
+        if source.suffix.lower() != ".pdf":
+            raise ValueError("输入必须为 PDF")
+        digest = hash_file(source)
+        with _TASK_CREATION_LOCK:
+            matches = [
+                task for path in sorted(self.root.glob("*/task.json"))
+                if re.fullmatch(r"[A-Za-z0-9_-]+", path.parent.name)
+                and (task := self.get_task(path.parent.name)).source.sha256 == digest
+            ]
+            if len(matches) > 1:
+                raise ValueError("存在多个相同来源的任务")
+            if matches:
+                return matches[0]
+            now = datetime.now(timezone(timedelta(hours=8))).replace(microsecond=0)
+            task = Task(
+                task_id=f"task-{uuid.uuid4().hex}", created_at=now, updated_at=now,
+                source=TaskSource(original_filename=original_filename or source.name, sha256=digest),
+            )
+            self._create(task, source)
             return task
 
-    def get_status(self, task_id: str) -> TaskStatusUpdate:
-        return TaskStatusUpdate.from_task(self.load(task_id))
+    def run_task(
+        self, task_id: str, *, additional_prompt: str = "",
+        stop_before: str | None = None, raise_on_error_at: str | None = None,
+    ) -> Task:
+        """执行已排队的阶段，直到需要操作、失败、结束或到达指定阶段。"""
+        with _TASK_OPERATION_LOCK:
+            task = self.get_task(task_id)
+            if task.current_stage not in RUNNABLE_STAGES:
+                return task
+            if task.status == "running":
+                transition = PaperWorkflow.next_state(task.current_stage, task.status, "interrupted")
+                PaperWorkflow.apply_transition(task, transition)
+                self._save_task(task)
+                return task
+            if task.status != "pending" or task.current_stage == stop_before:
+                return task
 
-    def regenerate_task(self, task_id: str, action: str, *, additional_prompt: str = "") -> Task:
-        from .workflow import REGENERATION_ACTIONS
+            try:
+                from .stages import StageHandlers
 
-        if action not in REGENERATION_ACTIONS:
-            raise UnsupportedRegenerationAction(action)
-        with TASK_OPERATION_LOCK:
-            task = self.load(task_id)
-            return self._workflow().submit_review(task, action, additional_prompt=additional_prompt)
+                workflow = PaperWorkflow(StageHandlers(self, self.repo))
+            except (ImportError, OSError, RuntimeError) as error:
+                logger.warning("任务工作流启动失败：%s", type(error).__name__)
+                stage = task.current_stage
+                transition = PaperWorkflow.next_state(stage, task.status, "startup_failure")
+                PaperWorkflow.apply_transition(task, transition, error=error)
+                self._save_task(task)
+                if stage == raise_on_error_at:
+                    raise
+                return task
+
+            while task.status == "pending" and task.current_stage in RUNNABLE_STAGES:
+                stage = task.current_stage
+                if stage == stop_before:
+                    break
+                workflow.apply_transition(task, workflow.next_state(stage, task.status, "start"))
+                self._save_task(task)
+                updated, result = workflow.run(task, additional_prompt=additional_prompt)
+                if result is None:
+                    raise RuntimeError(f"阶段未返回结果: {stage}")
+                error = result.error
+                try:
+                    self._publish_stage_result(updated, stage, result)
+                except Exception as publish_error:
+                    error = publish_error
+                    workflow.apply_transition(task, workflow.next_state(stage, task.status, "failure"), error=error)
+                else:
+                    task = updated
+                self._save_task(task)
+                if error is not None:
+                    if stage == raise_on_error_at:
+                        raise error
+                    break
+            return task
+
+    def submit_action_to_task(
+        self, task_id: str, action: TaskAction | str, *,
+        additional_prompt: str = "", stop_before: str | None = None, retry_stage: str | None = None,
+    ) -> Task:
+        """提交工作流动作，保存状态，再接着运行任务。"""
+        action = TaskAction(action)
+        with _TASK_OPERATION_LOCK:
+            task = self.get_task(task_id)
+            if action == TaskAction.ACCEPT and task.paper_id is not None:
+                try:
+                    self.repo.get_paper(task.paper_id)
+                except KeyError:
+                    raise ValueError("该任务关联的论文已从资料库移除") from None
+            updated = PaperWorkflow.submit_action(task, action, retry_stage=retry_stage)
+            if updated is not task:
+                self._save_task(updated)
+            return self.run_task(
+                task_id, additional_prompt=additional_prompt, stop_before=stop_before,
+                raise_on_error_at="ingest" if action == TaskAction.ACCEPT else None,
+            )
+
+    def _publish_stage_result(self, task: Task, stage: str, result: StageResult) -> None:
+        if result.error is not None and stage != "validate":
+            return
+        if result.ingest is not None:
+            draft = result.ingest
+            task.paper_id = self.repo.ingest_paper(
+                draft.source, sha256=draft.sha256, original_filename=draft.original_filename,
+                metadata=draft.metadata, classification=draft.classification,
+                summary=draft.summary, detailed_summary=draft.detailed_summary,
+            )
+            self._promote_classification_ids(self.repo.get_taxonomy())
+        if result.pending_taxonomy is not None:
+            self._write_classification_buffer(result.pending_taxonomy)
+        if not result.artifacts:
+            return
+        record = task.stages[stage]
+        if stage in REGENERATION_STAGES:
+            outputs = dict(result.artifacts)
+            report = outputs.pop(VALIDATION_ARTIFACT)
+            self._publish_regeneration(task.task_id, outputs, record.attempts, report)
+            record.artifacts = list(outputs)
+        else:
+            for path, content in result.artifacts.items():
+                self._write_artifact(task.task_id, path, content.encode("utf-8"))
+            record.artifacts = list(result.artifacts)
+
+    @staticmethod
+    def allowed_actions(task: Task) -> list[TaskAction]:
+        return PaperWorkflow.allowed_actions(task)
+
+    @staticmethod
+    def retryable_stages(task: Task) -> list[str]:
+        return PaperWorkflow.retryable_stages(task)
 
     def artifact_path(self, task_id: str, path: str = "") -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id):
@@ -114,14 +194,6 @@ class TaskManager:
             raise ValueError("路径超出任务目录")
         return target
 
-    def find_by_source_hash(self, sha256: str) -> list[str]:
-        matches = []
-        for path in sorted(self.root.glob("*/task.json")):
-            task = self.load(path.parent.name)
-            if task.source.sha256 == sha256:
-                matches.append(task.task_id)
-        return matches
-
     def list_tasks(self) -> list[Task]:
         """读取已经发布的任务。"""
         try:
@@ -133,42 +205,24 @@ class TaskManager:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", entry.name) or not entry.is_dir():
                 continue
             try:
-                task = self.load(entry.name)
+                task = self.get_task(entry.name)
                 # 状态读取不能等待正在执行的流水线释放锁。
-                if task.current_stage == "vectorize" and task.status == "running" and TASK_OPERATION_LOCK.acquire(blocking=False):
+                if (
+                    task.current_stage in RUNNABLE_STAGES
+                    and task.status == "running"
+                    and _TASK_OPERATION_LOCK.acquire(blocking=False)
+                ):
                     try:
-                        task = self.load(entry.name)
-                        if (
-                            task.current_stage == "vectorize" and task.status == "running"
-                            and (self.root, task.task_id) not in _ACTIVE_VECTOR_TASKS
-                        ):
-                            self._set_vector_stage(task, "failed", "上次向量生成已中断，可以重试")
+                        task = self.get_task(entry.name)
+                        if task.current_stage in RUNNABLE_STAGES and task.status == "running":
+                            transition = PaperWorkflow.next_state(task.current_stage, task.status, "interrupted")
+                            PaperWorkflow.apply_transition(task, transition)
                     finally:
-                        TASK_OPERATION_LOCK.release()
+                        _TASK_OPERATION_LOCK.release()
                 tasks.append(task)
             except FileNotFoundError:
                 continue
         return tasks
-
-    def create_task(self, source: Path, *, original_filename: str | None = None) -> Task:
-        """按 PDF 内容创建任务，或返回已有任务。"""
-        source = Path(source)
-        if source.suffix.lower() != ".pdf":
-            raise ValueError("输入必须为 PDF")
-        digest = hash_file(source)
-        with _TASK_CREATION_LOCK:
-            matches = self.find_by_source_hash(digest)
-            if len(matches) > 1:
-                raise ValueError("存在多个相同来源的任务")
-            if matches:
-                return self.load(matches[0])
-            now = datetime.now(timezone(timedelta(hours=8))).replace(microsecond=0)
-            task = Task(
-                task_id=f"task-{uuid.uuid4().hex}", created_at=now, updated_at=now,
-                source=TaskSource(original_filename=original_filename or source.name, sha256=digest),
-            )
-            self._create(task, source)
-            return task
 
     def _create(self, task: Task, source: Path) -> None:
         """在调用方持有创建锁时发布新任务目录。"""
@@ -187,14 +241,20 @@ class TaskManager:
             (staged / "task.json").write_text(task.model_dump_json(indent=2), encoding="utf-8")
             staged.rename(base)
 
-    def load(self, task_id: str) -> Task:
+    def get_task(self, task_id: str) -> Task:
         task = Task.model_validate_json(self.read_artifact(task_id, "task.json"))
         if task.task_id != task_id:
             raise ValueError("任务文件 ID 与目录名称不一致")
         return task
 
-    def save(self, task: Task) -> None:
+    def _save_task(self, task: Task) -> None:
+        task.updated_at = datetime.now(timezone(timedelta(hours=8))).replace(microsecond=0)
         self._write_artifact(task.task_id, "task.json", task.model_dump_json(indent=2).encode("utf-8"))
+        if self.callback is not None:
+            try:
+                self.callback(TaskStatusUpdate.from_task(task))
+            except Exception:
+                logger.exception("任务状态回调失败")
 
     def archive_task(self, task_id: str) -> None:
         """从任务列表移除任务，保留任务目录供恢复。"""
@@ -205,14 +265,12 @@ class TaskManager:
         return self._archive_task(task_id, restart=True)
 
     def _archive_task(self, task_id: str, *, restart: bool) -> Task:
-        if not TASK_OPERATION_LOCK.acquire(blocking=False):
+        if not _TASK_OPERATION_LOCK.acquire(blocking=False):
             raise ValueError("流水线正在处理任务，请稍后再试")
         try:
             with _TASK_CREATION_LOCK:
-                task = self.load(task_id)
-                if (self.root, task_id) in _ACTIVE_VECTOR_TASKS:
-                    raise ValueError("任务正在生成向量，请稍后再试")
-                if restart and task.paper_id is not None:
+                task = self.get_task(task_id)
+                if restart and not PaperWorkflow.can_restart(task):
                     raise ValueError("已入库的任务不能重新执行")
 
                 task_dir = self.artifact_path(task_id)
@@ -236,29 +294,7 @@ class TaskManager:
                         raise
                 return task
         finally:
-            TASK_OPERATION_LOCK.release()
-
-    def ingest_task(self, task_id: str) -> str:
-        """将已到审阅的任务产物交给正式库，保存编号及完成状态。"""
-        from .stages import StageHandlers
-
-        with TASK_OPERATION_LOCK:
-            task = self.load(task_id)
-            if task.paper_id is None and not task.can_ingest:
-                raise ValueError("任务须到达审阅阶段才能入库")
-            handlers = StageHandlers(self, papers_path=self.papers_path, taxonomy_path=self.taxonomy_path)
-            paper_id = handlers.ingest(task, handlers.repo)
-            self._promote_classification_ids(handlers.repo.get_taxonomy())
-            if task.paper_id is None:
-                task.paper_id = paper_id
-                self._set_vector_stage(task, "pending")
-                review = task.stages.setdefault("review", StageRecord())
-                review.status = "completed"
-                review.finished_at = review.finished_at or task.updated_at
-                review.wait_reason = None
-                review.error = None
-                self.save(task)
-            return paper_id
+            _TASK_OPERATION_LOCK.release()
 
     def read_classification_buffer(self) -> dict:
         path = self.root / taxonomy_buffer.BUFFER_FILENAME
@@ -268,15 +304,6 @@ class TaskManager:
             return json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return taxonomy_buffer.empty_buffer()
-
-    def buffer_classification(self, draft: dict, taxonomy: dict) -> dict:
-        with TASK_OPERATION_LOCK:
-            pending = self.read_classification_buffer()
-            previous_counters = dict(pending["counters"])
-            draft = taxonomy_buffer.buffer_classification(draft, taxonomy, pending)
-            if pending["counters"] != previous_counters:
-                self._write_classification_buffer(pending)
-            return draft
 
     def _promote_classification_ids(self, taxonomy: dict) -> None:
         pending = self.read_classification_buffer()
@@ -307,78 +334,11 @@ class TaskManager:
     def _json_bytes(data: dict) -> bytes:
         return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
-    def generate_vector(self, task_id: str) -> str:
-        """调度向量阶段，并持久化任务状态。"""
-        from .stages import StageHandlers, VectorGenerationError
-
-        key = (self.root, task_id)
-        with TASK_OPERATION_LOCK:
-            task = self.load(task_id)
-            if task.paper_id is None:
-                raise ValueError("论文尚未入库")
-            review = task.stages.get("review")
-            if review is None or review.status != "completed":
-                raise ValueError("审阅完成后才能生成向量")
-            stage = task.stages.get("vectorize")
-            if stage is None or (stage.status != "completed" and task.current_stage != "vectorize"):
-                raise ValueError("任务尚未进入向量生成阶段")
-            if key in _ACTIVE_VECTOR_TASKS:
-                return "running"
-            if stage.status == "completed":
-                return "completed"
-            self._set_vector_stage(task, "running")
-            self.save(task)
-            _ACTIVE_VECTOR_TASKS.add(key)
-
-        status = "failed"
-        failure_message = "向量生成失败，可以重试"
-        try:
-            handlers = StageHandlers(
-                self, papers_path=self.papers_path, taxonomy_path=self.taxonomy_path,
-            )
-            handlers.execute("vectorize", task)
-            status = "completed"
-        except VectorGenerationError:
-            pass
-        except ValueError as error:
-            failure_message = str(error)
-            raise
-        finally:
-            with TASK_OPERATION_LOCK:
-                try:
-                    task = self.load(task_id)
-                    self._set_vector_stage(task, status, failure_message)
-                    self.save(task)
-                finally:
-                    _ACTIVE_VECTOR_TASKS.discard(key)
-        return status
-
-    @staticmethod
-    def _set_vector_stage(task: Task, status: str, message: str | None = None) -> None:
-        now = datetime.now(timezone(timedelta(hours=8))).replace(microsecond=0)
-        stage = task.stages.setdefault("vectorize", StageRecord())
-        task.current_stage = None if status == "completed" else "vectorize"
-        task.status = status
-        task.updated_at = now
-        stage.status = status
-        stage.error = {"code": "vector_failed", "message": message or "向量生成失败"} if status == "failed" else None
-        if status == "running":
-            stage.attempts += 1
-            stage.started_at = now
-            stage.finished_at = None
-        elif status in ("completed", "failed"):
-            stage.finished_at = now
-
     def read_artifact(self, task_id: str, path: str) -> bytes:
         """读取任务产物的原始字节。"""
         return self.artifact_path(task_id, path).read_bytes()
 
-    def publish_artifacts(self, task_id: str, outputs: dict[str, str]) -> None:
-        """逐个发布 UTF-8 文本产物。"""
-        for path, content in outputs.items():
-            self._write_artifact(task_id, path, content.encode("utf-8"))
-
-    def publish_regeneration(
+    def _publish_regeneration(
         self, task_id: str, outputs: dict[str, str], attempt: int, report_text: str,
     ) -> None:
         """归档旧草稿，发布新产物和校验报告，发布失败时恢复草稿。"""
@@ -388,7 +348,7 @@ class TaskManager:
             for path, content in outputs.items():
                 self._write_artifact(task_id, path, content.encode("utf-8"))
                 published.append(path)
-            self._write_artifact(task_id, "validation/report.json", report_text.encode("utf-8"))
+            self._write_artifact(task_id, VALIDATION_ARTIFACT, report_text.encode("utf-8"))
         except Exception:
             for path in reversed(published):
                 self._write_artifact(task_id, path, self.read_artifact(task_id, backups[path]))

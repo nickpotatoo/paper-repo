@@ -3,14 +3,21 @@ import {renderDetailedSummaryMarkdown} from '../markdown.js';
 
 const TASK_REFRESH_INTERVAL_MS = 5000;
 
-const statuses = {
-  pending:'待处理', running:'进行中', waiting:'等待处理', failed:'失败',
-  completed:'已完成', duplicate:'重复论文', cancelled:'已取消', skipped:'已跳过',
+const taskStatuses = {
+  pending:'待处理', running:'进行中', action_required:'待操作', failed:'失败', finished:'已结束',
 };
+const stageStatuses = {
+  pending:'待处理', running:'进行中', action_required:'待操作', failed:'失败',
+  completed:'已完成', skipped:'已跳过',
+};
+const outcomes = {completed:'已完成', duplicate:'重复论文', cancelled:'已取消'};
+const canAct = (task, action) => task?.allowed_actions?.includes(action) ?? false;
 const stages = {
   prepare:'准备任务', deduplicate:'检查重复', extract:'提取 PDF', metadata:'提取元数据',
   classify:'生成分类', rough_summary:'生成粗略总结', detailed_summary:'生成精细总结',
-  validate:'校验草稿', review:'审阅', vectorize:'生成向量', regenerate_classification:'重新生成分类',
+  validate:'校验草稿', review:'审阅', ingest:'入库', vectorize:'生成向量', regenerate_classification:'重新生成分类',
+  finished:'任务完成',
+  retry_vectorize:'重试生成向量',
   regenerate_metadata:'重新生成元数据',
   regenerate_rough_summary:'重新生成粗略总结', regenerate_detailed_summary:'重新生成精细总结',
 };
@@ -18,6 +25,7 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
   timeZone:'Asia/Shanghai', dateStyle:'medium', timeStyle:'medium',
 });
 const timestamp = value => Date.parse(value) || 0;
+const isVectorStage = stage => stage === 'vectorize' || stage === 'retry_vectorize';
 const contentActions = {
   metadata: {id:'regenerate_metadata', label:'重新生成元数据', success:'论文元数据已更新。'},
   classification: {id:'regenerate_classification', label:'重新生成分类', success:'论文分类已更新。'},
@@ -50,25 +58,31 @@ function renderJson(value, depth = 0) {
     `<div><dt>${label(fieldNames, key)}</dt><dd>${renderJson(item, depth + 1)}</dd></div>`).join('')}</dl>`;
 }
 
-function renderTask(task, expanded, generating) {
-  const vectorStatus = generating ? 'running' : task.stages?.vectorize?.status;
-  const taskStatus = generating ? 'running' : task.status;
+function renderTask(task, expanded, generating, retrying) {
+  const currentStage = task.current_stage;
+  const vectorStatus = generating ? 'running' : task.stages?.[currentStage]?.status;
+  const taskStatus = generating || retrying ? 'running' : task.status;
+  const retryStages = canAct(task, 'retry') ? task.retryable_stages ?? [] : [];
   const stageRecords = Object.entries(task.stages ?? {}).filter(([id, stage]) =>
-    (id !== 'vectorize' || task.paper_id) &&
-    (!id.startsWith('regenerate_') || stage?.status !== 'pending' || id === task.current_stage),
+    (!isVectorStage(id) || task.paper_id) &&
+    (id !== 'finished' || id === currentStage) &&
+    (id !== 'ingest' || stage?.status !== 'pending' || id === currentStage) &&
+    (!(id.startsWith('regenerate_') || id === 'retry_vectorize') ||
+      stage?.status !== 'pending' || id === currentStage),
   );
-  const active = task.current_stage ? task.stages?.[task.current_stage] : null;
+  const active = task.stages?.[currentStage];
   const updated = timestamp(task.updated_at);
-  let state = label(statuses, taskStatus);
-  if (taskStatus === 'waiting' && task.current_stage === 'review') state = '待审阅';
-  if (taskStatus === 'pending' && task.current_stage === 'vectorize') state = '待生成向量';
+  let state = taskStatus === 'finished' && task.outcome
+    ? label(outcomes, task.outcome) : label(taskStatuses, taskStatus);
+  if (taskStatus === 'action_required' && task.current_stage === 'review') state = '待审阅';
+  if (taskStatus === 'pending' && isVectorStage(currentStage)) state = '等待生成向量';
   const details = stageRecords.map(([id, stage]) => {
-    const vectorRunning = id === 'vectorize' && generating;
+    const vectorRunning = id === currentStage && generating;
     const note = vectorRunning ? null : stage?.error?.message || stage?.wait_reason;
-    const current = id === task.current_stage;
+    const current = id === currentStage;
     return `<li${current ? ' class="task-stage-current" aria-current="step"' : ''}>
       <span>${label(stages, id)}</span>
-      <span>${label(statuses, vectorRunning ? 'running' : stage?.status)}</span>
+      <span>${label(stageStatuses, vectorRunning ? 'running' : stage?.status)}</span>
       ${note ? `<small>${esc(note)}</small>` : ''}
     </li>`;
   }).join('');
@@ -77,7 +91,7 @@ function renderTask(task, expanded, generating) {
       <span class="task-filename">${esc(task.source?.original_filename || task.task_id)}</span>
       <span class="task-state" data-state="${esc(taskStatus)}">${state}</span>
       <span class="task-quick-meta">
-        ${task.current_stage ? `<span>${label(stages, task.current_stage)}</span>` : ''}
+      ${currentStage ? `<span>${label(stages, currentStage)}</span>` : ''}
         ${updated ? `<time datetime="${esc(task.updated_at)}" title="北京时间">${dateFormatter.format(updated)}</time>` : ''}
       </span>
     </summary>
@@ -85,19 +99,20 @@ function renderTask(task, expanded, generating) {
       <dt>任务 ID</dt><dd>${esc(task.task_id)}</dd>
       ${task.paper_id ? `<dt>入库编号</dt><dd>${esc(task.paper_id)}</dd>` : ''}
       ${task.duplicate_of ? `<dt>匹配论文</dt><dd>${esc(task.duplicate_of)}</dd>` : ''}
-      ${!task.paper_id && active?.wait_reason ? `<dt>等待原因</dt><dd>${esc(active.wait_reason)}</dd>` : ''}
+      ${!task.paper_id && active?.wait_reason ? `<dt>待操作原因</dt><dd>${esc(active.wait_reason)}</dd>` : ''}
     </dl>
     ${details ? `<ol class="task-stages" aria-label="阶段进度">${details}</ol>` : ''}
     <div class="task-entry-actions">
       <div class="task-management-actions">
       <button class="action task-secondary" type="button" data-read-task="${esc(task.task_id)}">阅读任务内容</button>
-      ${task.paper_id ? '' : '<button class="action task-secondary" type="button" data-manage-action="restart" aria-haspopup="dialog">重新执行</button>'}
-      <button class="action task-secondary task-delete" type="button" data-manage-action="delete" aria-haspopup="dialog">删除任务</button>
+      ${canAct(task, 'restart') ? '<button class="action task-secondary" type="button" data-manage-action="restart" aria-haspopup="dialog">重新执行</button>' : ''}
+      ${canAct(task, 'archive') ? '<button class="action task-secondary task-delete" type="button" data-manage-action="delete" aria-haspopup="dialog">删除任务</button>' : ''}
       </div>
-      ${!task.paper_id && task.can_ingest
-        ? `<button class="action" type="button" data-ingest-task="${esc(task.task_id)}" aria-haspopup="dialog">入库</button>` : ''}
-      ${task.paper_id && task.current_stage === 'vectorize' && vectorStatus !== 'completed'
-        ? `<button class="action" type="button" data-vector-task="${esc(task.task_id)}"${vectorStatus === 'running' ? ' disabled' : ''}>${vectorStatus === 'running' ? '生成中…' : vectorStatus === 'failed' ? '重试生成向量' : '生成向量'}</button>` : ''}
+      ${canAct(task, 'accept') && !retryStages.includes(currentStage)
+        ? `<button class="action" type="button" data-ingest-task="${esc(task.task_id)}" aria-haspopup="dialog">${currentStage === 'ingest' && active?.status === 'failed' ? '重试入库' : '入库'}</button>` : ''}
+      ${(canAct(task, 'generate_vector') && !retryStages.includes(currentStage)) || generating
+        ? `<button class="action" type="button" data-vector-task="${esc(task.task_id)}"${vectorStatus === 'running' ? ' disabled' : ''}>${vectorStatus === 'running' ? '生成中…' : vectorStatus === 'failed' ? '重试生成向量' : '启动向量生成'}</button>` : ''}
+      ${retryStages.map(stage => `<button class="action" type="button" data-retry-stage="${esc(stage)}"${retrying ? ' disabled' : ''}>${retrying ? '重试中…' : `重试：${label(stages, stage)}`}</button>`).join('')}
     </div>
   </details>`;
 }
@@ -155,8 +170,9 @@ export function setupTasks(api, onIngest = () => {}) {
   let regenerationKey = null;
   const expandedTasks = new Set();
   const generatingTasks = new Set();
+  const retryingTasks = new Set();
   const regeneratingTasks = new Set();
-  const visibleStatus = task => generatingTasks.has(task.task_id) ? 'running' : task.status;
+  const visibleStatus = task => generatingTasks.has(task.task_id) || retryingTasks.has(task.task_id) ? 'running' : task.status;
 
   function renderList() {
     for (const item of list.querySelectorAll('[data-task-id]')) {
@@ -170,7 +186,7 @@ export function setupTasks(api, onIngest = () => {}) {
       return !term || filename.toLowerCase().includes(term) || task.task_id.toLowerCase().includes(term);
     });
     list.innerHTML = visible.map(task =>
-      renderTask(task, expandedTasks.has(task.task_id), generatingTasks.has(task.task_id)),
+      renderTask(task, expandedTasks.has(task.task_id), generatingTasks.has(task.task_id), retryingTasks.has(task.task_id)),
     ).join('');
     if (!tasks.length) status.textContent = '暂无论文处理任务。';
     else if (!visible.length) status.textContent = '没有符合条件的任务。';
@@ -186,8 +202,8 @@ export function setupTasks(api, onIngest = () => {}) {
     }
     statusFilter.replaceChildren(
       new Option(`全部状态（${tasks.length}）`, ''),
-      ...Object.keys(statuses).filter(status => status !== 'skipped' && (counts.has(status) || status === selected))
-        .map(status => new Option(`${statuses[status]}（${counts.get(status) ?? 0}）`, status)),
+      ...Object.keys(taskStatuses).filter(status => counts.has(status) || status === selected)
+        .map(status => new Option(`${taskStatuses[status]}（${counts.get(status) ?? 0}）`, status)),
     );
     statusFilter.value = selected;
   }
@@ -223,7 +239,7 @@ export function setupTasks(api, onIngest = () => {}) {
       } else {
         const restarted = await api.restartTask(id, password.value);
         const task = tasks.find(item => item.task_id === id);
-        if (task) Object.assign(task, restarted, {stages:{}, duplicate_of:null, can_ingest:false});
+        if (task) Object.assign(task, restarted, {stages:{}, duplicate_of:null, outcome:null, allowed_actions:['restart', 'archive'], retryable_stages:[]});
       }
       manageDialog.close();
       refreshStatusOptions();
@@ -263,19 +279,10 @@ export function setupTasks(api, onIngest = () => {}) {
       ingestConfirm.disabled = false;
       ingestCancel.disabled = false;
     }
-    task.paper_id = paperId;
-    task.can_ingest = false;
-    task.status = 'pending';
-    task.current_stage = 'vectorize';
-    task.stages = {
-      ...task.stages,
-      review: {...task.stages?.review, status:'completed', wait_reason:null, error:null},
-      vectorize: {status:'pending'},
-    };
     ingestDialog.close();
-    refreshStatusOptions();
-    renderList();
-    status.textContent = `已入库：${paperId}，待生成向量。`;
+    await refresh({automatic:true});
+    if (!dialog.open) return;
+    status.textContent = `已入库（${paperId}），将自动在后台生成向量。`;
     const entry = Array.from(list.querySelectorAll('[data-task-id]')).find(row => row.dataset.taskId === task.task_id);
     (entry?.querySelector('summary') ?? refreshButton).focus();
     onIngest();
@@ -372,12 +379,12 @@ export function setupTasks(api, onIngest = () => {}) {
 
   function renderTaskContents() {
     const task = tasks.find(item => item.task_id === activeTask);
-    const canRegenerate = task?.status === 'waiting' && task.current_stage === 'review' && !task.paper_id;
     const disabled = regeneratingTasks.has(activeTask) ? ' disabled' : '';
     contentsList.innerHTML = availableContents.map(({title, key}) => {
       const action = key === 'pdf' ? '打开 PDF' : '预览';
       const accessibleLabel = key === 'pdf' ? '在新标签页打开 PDF' : `预览${title}`;
-      const regenerate = canRegenerate && Object.hasOwn(contentActions, key) ? contentActions[key] : null;
+      const option = Object.hasOwn(contentActions, key) ? contentActions[key] : null;
+      const regenerate = option && canAct(task, option.id) ? option : null;
       return `<li>
         <span>${esc(title)}</span>
         <div class="task-content-actions">
@@ -392,6 +399,7 @@ export function setupTasks(api, onIngest = () => {}) {
     const id = activeTask;
     if (!id || !password.value || regeneratingTasks.has(id) || !Object.hasOwn(contentActions, key)) return;
     const {id:action, label, success} = contentActions[key];
+    if (!canAct(tasks.find(item => item.task_id === id), action)) return;
     regeneratingTasks.add(id);
     renderTaskContents();
     contentStatus.classList.remove('error');
@@ -488,34 +496,24 @@ export function setupTasks(api, onIngest = () => {}) {
 
   async function generateVector(taskId) {
     const task = tasks.find(item => item.task_id === taskId);
-    if (!task?.paper_id || task.current_stage !== 'vectorize' ||
-        task.stages?.vectorize?.status === 'running' || generatingTasks.has(taskId)) return;
+    if (!canAct(task, 'generate_vector') || generatingTasks.has(taskId)) return;
     generatingTasks.add(taskId);
     refreshStatusOptions();
     renderList();
-    let nextStatus;
     let message;
     let failed = false;
     try {
-      nextStatus = await api.generateTaskVector(taskId, password.value);
+      const nextStatus = await api.generateTaskVector(taskId, password.value);
       message = nextStatus === 'completed' ? '向量已生成。' : '向量正在生成，可刷新查看结果。';
     } catch (error) {
-      nextStatus = error.stageStatus;
       failed = true;
       message = error.message || '向量生成失败。';
     } finally {
       generatingTasks.delete(taskId);
     }
-    const current = tasks.find(item => item.task_id === taskId);
-    if (!dialog.open || !current) return;
-    if (nextStatus) {
-      current.status = nextStatus;
-      current.current_stage = nextStatus === 'completed' ? null : 'vectorize';
-      current.stages.vectorize = {
-        ...current.stages.vectorize, status:nextStatus,
-        error: nextStatus === 'failed' ? {message} : null,
-      };
-    }
+    if (!dialog.open) return;
+    await refresh({automatic:true});
+    if (!dialog.open) return;
     refreshStatusOptions();
     renderList();
     status.classList.toggle('error', failed);
@@ -523,12 +521,39 @@ export function setupTasks(api, onIngest = () => {}) {
   }
 
   list.addEventListener('click', async event => {
+    const retryButton = event.target.closest('[data-retry-stage]');
+    if (retryButton && password.value && !refreshButton.disabled) {
+      const taskId = retryButton.closest('[data-task-id]').dataset.taskId;
+      const stage = retryButton.dataset.retryStage;
+      const task = tasks.find(item => item.task_id === taskId);
+      if (!canAct(task, 'retry') || !task.retryable_stages?.includes(stage) || retryingTasks.has(taskId)) return;
+      retryingTasks.add(taskId);
+      refreshStatusOptions();
+      renderList();
+      let error;
+      try {
+        const result = await api.retryTask(taskId, stage, password.value);
+        if (stage === 'ingest' && result.paper_id) onIngest();
+      } catch (failure) {
+        error = failure;
+      } finally {
+        retryingTasks.delete(taskId);
+      }
+      if (!dialog.open) return;
+      await refresh({automatic:true});
+      if (!dialog.open) return;
+      refreshStatusOptions();
+      renderList();
+      status.classList.toggle('error', Boolean(error));
+      status.textContent = error?.message || '已重试，请查看最新任务状态。';
+      return;
+    }
     const manageButton = event.target.closest('[data-manage-action]');
     if (manageButton && password.value && !refreshButton.disabled) {
       const id = manageButton.closest('[data-task-id]').dataset.taskId;
       const task = tasks.find(item => item.task_id === id);
       const action = manageButton.dataset.manageAction;
-      if (!task || (action === 'restart' && task.paper_id)) return;
+      if (!canAct(task, action === 'delete' ? 'archive' : 'restart')) return;
       request?.abort();
       request = null;
       clearTimeout(refreshTimer);
@@ -552,7 +577,7 @@ export function setupTasks(api, onIngest = () => {}) {
     }
     const ingestButton = event.target.closest('[data-ingest-task]');
     if (ingestButton && password.value && !refreshButton.disabled) {
-      selectedForIngest = tasks.find(task => task.task_id === ingestButton.dataset.ingestTask && task.can_ingest);
+      selectedForIngest = tasks.find(task => task.task_id === ingestButton.dataset.ingestTask && canAct(task, 'accept'));
       if (selectedForIngest) {
         ingestFilename.textContent = selectedForIngest.source?.original_filename || selectedForIngest.task_id;
         ingestStatus.textContent = '';

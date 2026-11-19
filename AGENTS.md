@@ -9,7 +9,8 @@
 | 位置 | 用途 |
 | --- | --- |
 | `new_papers/` | 待处理的原始 PDF |
-| `task/<task_id>/` | 任务状态、原件副本、分析草稿和校验报告 |
+| `task/<task_id>/` | `task.json`、原件副本、分析草稿和校验报告 |
+| `task/.task-archive/` | 已移出列表的任务及重新执行前的旧版本 |
 | `task/taxonomy_buffer.json` | 所有任务共享的待入库分类和标签 |
 | `data/papers.json` | 正式论文记录，顶层为数组 |
 | `data/taxonomy.json` | 正式分类、标签和文献类型索引 |
@@ -26,11 +27,22 @@ JSON 和 Markdown 使用 UTF-8。JSON 字段使用英文 snake_case。保留原�
 2. **阅读论文。** 至少核对标题页、摘要、引言、方法或系统设计，以及实验或讨论。遇到扫描件、公式丢失或提取不全时，在精细总结中写明影响。以能确认的原文为依据。
 3. **准备元数据。** 新加入的 PDF 如果尚未按规范命名，入库时将其重命名为便于检索的英文小写短横线文件名，例如 `paper-title-2026.pdf`。在 `original_filename` 中保留来源文件名。作者或年份无法确认时填 `null`。
 4. **确定分类并撰写总结。** 按第 3 节复用或提出定义。粗略总结用一至三句中文概括研究问题、主要方法或贡献和代表性结论。精细总结按第 4 节单独撰写。
-5. **确认并入库。** 走任务流水线时，通过任务「入库」或调用 `TaskManager.ingest_task(task_id)`，由系统同步任务状态和临时分类引用。独立整理的草稿可用 `RepoManager.ingest_paper(...)`，提交原件、SHA-256、来源文件名、元数据、分类草稿、概述和精细总结。该入口接收正式 ID 和候选定义。返回值是稳定的正式论文编号。
+5. **确认并入库。** 走任务流水线时，通过任务「入库」或调用 `TaskManager.submit_action_to_task(task_id, TaskAction.ACCEPT)`，由系统同步任务状态和临时分类引用。独立整理的草稿可用 `RepoManager.ingest_paper(...)`，提交原件、SHA-256、来源文件名、元数据、分类草稿、概述和精细总结。该入口接收正式 ID 和候选定义。返回值是稳定的正式论文编号。
 6. **核对并生成向量。** 用 `src.RepoManager.load_data()` 核对论文记录、索引和附件，并处理返回的 `errors` 与抛出的异常。必要时重新计算 PDF 哈希并与记录比对。按第 6 节生成本次入库论文的向量。
 7. **交付。** 汇报论文编号、主分类及新增定义、文件名变化、校验结果、向量生成状态和原文提取限制。
 
-任务流水线运行到待审阅后可预览产物。元数据、分类与标签、粗略总结、精细总结可分别重新生成。附加提示词只作用于当前一次生成，适合指定需核对的事实或需展开的内容。整篇重新执行会从原始 PDF 开始。具体入口见 [PaperProcessing](src/PaperProcessing/README.md)。
+### 流水线操作
+
+- 脚本先调用 `TaskManager.create_task(pdf_path)` 创建或复用任务，再调用 `run_task(task_id)`。运行会逐阶段保存产物，在待审阅、失败或终态停下。查询完整记录用 `get_task(task_id)`。
+- 到达 `review/action_required` 后，预览并核对草稿。元数据、分类与标签、粗略总结、精细总结可以分别重生成。附加提示词只用于本次生成。确认入库用 `submit_action_to_task(task_id, TaskAction.ACCEPT)`。
+- 阶段失败时，先看阶段的错误或校验报告，再用界面的「重试：阶段名」，或调用 `submit_action_to_task(task_id, TaskAction.RETRY, retry_stage=stage)`。分析、入库从失败阶段继续；向量进入 `retry_vectorize`，保留首次失败记录；单项重生成失败时可在审阅中重试该项。
+- 「重新执行」只适用于未入库的任务，会归档旧产物并从原始 PDF 开始。「删除任务」会归档任务目录，正式入库的论文、附件和向量仍保留。
+
+### 维护流水线代码
+
+维持 `route → TaskManager → PaperWorkflow` 的调用边界。路由负责认证、HTTP 响应和后台调度；管理器负责创建任务、运行阶段、提交动作以及保存状态和产物；工作流负责动作资格与状态转移；阶段处理器负责具体处理、内容校验和向量生成。
+
+任务状态是 `pending`、`running`、`action_required`、`failed` 和 `finished`。结束结果通过 `outcome` 区分完成、重复与取消。阶段自己的状态可与任务不同，例如向量阶段失败时，阶段为 `failed`，任务为 `action_required`。前端用 `allowed_actions` 和 `retryable_stages` 决定显示哪些操作。修改动作或状态时，同步核对工作流、管理器接口、路由、前端和 [PaperProcessing 文档](src/PaperProcessing/README.md)。
 
 ## 3. 分类、标签和文献类型
 
@@ -66,7 +78,7 @@ JSON 和 Markdown 使用 UTF-8。JSON 字段使用英文 snake_case。保留原�
 
 ## 6. 向量与检索
 
-论文入库并核对后，为本次新增论文生成向量。对流水线任务使用「生成向量」或 `TaskManager.generate_vector(task_id)`，以更新任务状态。独立整理时复用同一个 `PaperVectorService`，逐篇调用 `create_vector(index=paper_id)` 并检查返回项中的 `paper_id` 和 `saved`。省略 `index` 会处理全库。
+查看器确认入库后返回论文编号，再在后台执行 `vectorize`。入库成功后核对向量阶段是否完成；失败时按失败阶段名重试，向量重试进入 `retry_vectorize`。用户要求暂缓生成时，使用 `TaskManager.submit_action_to_task(task_id, TaskAction.ACCEPT, stop_before="vectorize")`。独立整理时复用同一个 `PaperVectorService`，逐篇调用 `create_vector(index=paper_id)` 并检查返回项中的 `paper_id` 和 `saved`。省略 `index` 会处理全库。
 
 向量请求会将概述、精细总结及题名、文献类型、标签等上下文发送给配置的嵌入服务。按用户授权执行。用户要求暂不生成时，报告跳过的编号。服务失败时保留已入库资料并记录失败原因。`saved=True` 可表示成功保存或已有向量无需改写。概述、精细总结或嵌入上下文更新后，按对应编号刷新向量。
 

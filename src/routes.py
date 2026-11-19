@@ -32,7 +32,7 @@ from src.config import (
     SERVICE_PASSWORD, NEW_PAPERS_DIR, TASKS_DIR, UPLOAD_MAX_BYTES,
     REGENERATION_MAX_PROMPT_CHARS, REGENERATION_MAX_REQUEST_BYTES,
 )
-from src.PaperProcessing import TaskManager, UnsupportedRegenerationAction
+from src.PaperProcessing import REGENERATION_ACTIONS, TaskAction, TaskManager
 from src.RepoManager import (
     validate_data, load_papers, load_taxonomy, load_state,
 )
@@ -220,8 +220,19 @@ def create_router(
     """先注册明确的接口，再注册未知路径的兜底路由。"""
     router = APIRouter()
     tasks_manager = TaskManager(
-        tasks_dir, create_root=False, papers_path=papers_path, taxonomy_path=taxonomy_path,
+        tasks_dir, create_root=False, papers_path=papers_path, taxonomy_path=taxonomy_path, state_path=state_path,
     )
+
+    def run_queued_task(task_id: str) -> None:
+        try:
+            tasks_manager.run_task(task_id)
+        except FileNotFoundError:
+            # 任务可能在后台开始前被归档。其他文件错误继续向上报告。
+            try:
+                tasks_manager.get_task(task_id)
+            except FileNotFoundError:
+                return
+            raise
 
     @router.get("/api/tasks")
     def task_statuses(request: Request) -> Response:
@@ -237,12 +248,14 @@ def create_router(
             {
                 "task_id": task.task_id,
                 "status": task.status,
+                "outcome": task.outcome,
                 "current_stage": task.current_stage,
                 "updated_at": task.updated_at.isoformat(),
                 "source": {"original_filename": task.source.original_filename},
                 "duplicate_of": task.duplicate_of,
                 "paper_id": task.paper_id,
-                "can_ingest": task.can_ingest,
+                "allowed_actions": tasks_manager.allowed_actions(task),
+                "retryable_stages": tasks_manager.retryable_stages(task),
                 "stages": {
                     name: {
                         "status": stage.status,
@@ -257,22 +270,49 @@ def create_router(
         ]})
 
     @router.post("/api/tasks/{task_id}/ingest")
-    def ingest_task(request: Request, task_id: str) -> Response:
+    def ingest_task(request: Request, task_id: str, background_tasks: BackgroundTasks) -> Response:
         auth_error = _require_service_password(request)
         if auth_error is not None:
             return auth_error
         try:
-            paper_id = tasks_manager.ingest_task(task_id)
+            task = tasks_manager.submit_action_to_task(task_id, TaskAction.ACCEPT, stop_before="vectorize")
+            paper_id = task.paper_id
+            if paper_id is None:
+                raise RuntimeError("入库阶段未返回论文编号")
         except FileExistsError as error:
             return _json_response(409, {"error": str(error)})
         except ValueError as error:
             return _json_response(409, {"error": str(error)})
-        except OSError as error:
+        except (OSError, ImportError, RuntimeError) as error:
             if isinstance(error, FileNotFoundError):
                 return _json_response(404, {"error": "任务或资料库文件不存在"})
             logger.warning("论文入库失败：%s", type(error).__name__)
             return _json_response(500, {"error": "写入资料库失败，请检查服务端文件"})
+        background_tasks.add_task(run_queued_task, task_id)
         return _json_response(200, {"paper_id": paper_id})
+
+    @router.post("/api/tasks/{task_id}/retry")
+    def retry_task(request: Request, task_id: str, stage: str, background_tasks: BackgroundTasks) -> Response:
+        auth_error = _require_service_password(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            task = tasks_manager.submit_action_to_task(
+                task_id, TaskAction.RETRY, retry_stage=stage, stop_before="vectorize" if stage == "ingest" else None,
+            )
+        except FileNotFoundError:
+            return _json_response(404, {"error": "任务不存在"})
+        except ValueError as error:
+            return _json_response(409, {"error": str(error)})
+        except (OSError, RuntimeError) as error:
+            logger.warning("重试任务失败：%s", type(error).__name__)
+            return _json_response(503, {"error": "无法重试任务，请检查服务端配置或文件"})
+        retried = task.stages["retry_vectorize" if stage == "vectorize" else stage]
+        if retried.status == "failed":
+            return _json_response(503, {"error": "该阶段重试失败，请查看任务状态", "stage_status": retried.status})
+        if stage == "ingest" and task.paper_id is not None:
+            background_tasks.add_task(run_queued_task, task_id)
+        return _json_response(200, {"stage_status": retried.status, "paper_id": task.paper_id})
 
     @router.post("/api/tasks/{task_id}/vector")
     def generate_task_vector(request: Request, task_id: str) -> Response:
@@ -280,12 +320,16 @@ def create_router(
         if auth_error is not None:
             return auth_error
         try:
-            status = tasks_manager.generate_vector(task_id)
+            task = tasks_manager.submit_action_to_task(task_id, TaskAction.GENERATE_VECTOR)
+            stage = task.stages.get(task.current_stage or "")
+            if stage is None:
+                raise RuntimeError("向量阶段未返回状态")
+            status = stage.status
         except FileNotFoundError:
             return _json_response(404, {"error": "任务或资料库文件不存在"})
         except ValueError as error:
             return _json_response(409, {"error": str(error)})
-        except OSError as error:
+        except (OSError, RuntimeError) as error:
             logger.warning("保存向量生成状态失败：%s", type(error).__name__)
             return _json_response(500, {"error": "无法保存向量生成状态"})
         if status == "failed":
@@ -297,16 +341,16 @@ def create_router(
         auth_error = _require_service_password(request)
         if auth_error is not None:
             return auth_error
+        if action not in REGENERATION_ACTIONS:
+            return _json_response(404, {"error": "该任务内容不支持重新生成"})
         try:
             additional_prompt = await _read_regeneration_prompt(request)
         except ValueError as error:
             return _json_response(400, {"error": str(error)})
         try:
             task = await run_in_threadpool(
-                tasks_manager.regenerate_task, task_id, action, additional_prompt=additional_prompt,
+                tasks_manager.submit_action_to_task, task_id, action, additional_prompt=additional_prompt,
             )
-        except UnsupportedRegenerationAction:
-            return _json_response(404, {"error": "该任务内容不支持重新生成"})
         except FileNotFoundError:
             return _json_response(404, {"error": "任务不存在"})
         except ValueError as error:
@@ -331,7 +375,7 @@ def create_router(
         if key is not None and key not in _TASK_CONTENTS:
             return _json_response(404, {"error": "找不到该任务内容"})
         try:
-            task = tasks_manager.load(task_id)
+            task = tasks_manager.get_task(task_id)
             if key is not None:
                 _, relative, media_type = _TASK_CONTENTS[key]
                 path = _task_content_path(tasks_manager, task_id, relative)
@@ -384,7 +428,7 @@ def create_router(
         except (OSError, ImportError, RuntimeError) as error:
             logger.warning("重启任务失败：%s", type(error).__name__)
             return _json_response(503, {"error": "无法启动任务，请检查服务端配置或文件"})
-        background_tasks.add_task(tasks_manager.run_pending, task.task_id)
+        background_tasks.add_task(run_queued_task, task.task_id)
         return _json_response(202, task.model_dump(
             mode="json", include={"task_id", "status", "current_stage", "updated_at"},
         ))
@@ -440,7 +484,7 @@ def create_router(
                 })
             payload.update(task_id=task.task_id, status=task.status, current_stage=task.current_stage)
             if task.status == "pending" and task.current_stage == "prepare":
-                background_tasks.add_task(tasks_manager.run_pending, task.task_id)
+                background_tasks.add_task(run_queued_task, task.task_id)
         return _json_response(201, payload)
 
     @router.post("/api/semantic-search")

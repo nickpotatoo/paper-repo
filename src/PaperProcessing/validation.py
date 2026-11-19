@@ -4,6 +4,8 @@ import re
 from src.RepoManager import validate_classification_draft
 from .models import ValidationIssue, ValidationReport
 
+VALIDATION_ARTIFACT = "validation/report.json"
+
 
 def validate_draft(draft: dict, taxonomy: dict) -> ValidationReport:
     issues = []

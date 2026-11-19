@@ -147,8 +147,8 @@ dialog.tasks-dialog { width:min(740px,calc(100% - 28px)); padding:clamp(16px,4vw
 .task-entry summary:focus-visible { outline:2px solid var(--green); outline-offset:-2px; }
 .task-filename { font-weight:600; }
 .task-state { color:var(--muted); font-size:12px; white-space:nowrap; }
-.task-state[data-state="running"],.task-state[data-state="completed"] { color:var(--green); font-weight:600; }
-.task-state[data-state="waiting"] { color:#775a21; font-weight:600; }
+.task-state[data-state="running"],.task-state[data-state="finished"] { color:var(--green); font-weight:600; }
+.task-state[data-state="action_required"] { color:#775a21; font-weight:600; }
 .task-state[data-state="failed"] { color:#9a3d35; font-weight:600; }
 .task-quick-meta { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:2px 12px; color:var(--muted); font-size:12px; }
 .task-meta { display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 12px; font-size:13px; }

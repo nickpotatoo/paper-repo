@@ -28,12 +28,12 @@ task = tasks.create_task(Path("new_papers/example.pdf"))
 tasks.run_task(task.task_id)
 ```
 
-`create_task()` 按源 PDF 的 SHA-256 复用已有任务。`run_task()` 执行指定任务，`run_pending()` 用于后台调度尚未开始的新任务，`regenerate_task()` 执行待审阅任务的单项重生成，`get_status()` 读取状态快照。TaskManager 创建所需的工作流并持久化结果，`PaperWorkflow` 负责阶段推进和审阅规则。
+`create_task()` 按源 PDF 的 SHA-256 复用已有任务。`run_task()` 连续执行已排队的阶段，`submit_action_to_task()` 提交动作后继续执行，`get_task()` 读取任务。TaskManager 持久化状态和产物，PaperWorkflow 负责状态转移。
 
 任务列表中的「删除任务」对应 `DELETE /api/tasks/{task_id}`，将任务移至 `task/.task-archive/`。正式论文和向量留在资料库。「重新执行」对应 `POST /api/tasks/{task_id}/restart`，将未入库任务的旧产物归档，保留任务编号和原始 PDF，随后在后台从准备阶段重跑。两项操作均要求服务密码。
 
-`task.json` 在 `stages.vectorize` 中记录向量阶段的状态、尝试次数、时间和错误。审阅完成且入库后，`current_stage` 切换为 `vectorize`，任务与阶段状态都为 `pending`。触发生成后变为 `running`。失败时停在该阶段，可重试。成功后任务与阶段都为 `completed`，清除 `current_stage`。
+`task.json` 使用 `stages.vectorize` 记录首次生成，使用 `stages.retry_vectorize` 记录重试。审阅完成且入库后，任务通过 `run_task()` 执行首次生成。失败后可进入重试阶段，尝试次数和错误独立记录。失败时任务为 `action_required`，向量阶段为 `failed`。成功后任务进入 `finished`，结果为 `completed`。
 
-任务列表通过 `TaskManager.generate_vector(task_id, vector_service=service)` 调度「生成向量」或「重试生成向量」。`StageHandlers` 校验正式论文与任务原件是否一致，调用向量服务并检查保存结果。向量服务会将论文的概述和精细总结发送给配置的嵌入服务。任务管理器记录阶段状态和尝试次数，并防止同一进程内重复提交正在生成的任务。服务中断后可重试。
+任务列表通过 `TaskManager.submit_action_to_task(task_id, TaskAction.GENERATE_VECTOR)` 手动启动或重试向量阶段。该入口复用工作流。`StageHandlers` 校验正式论文与任务原件是否一致，调用向量服务并检查保存结果。向量服务会将论文的概述和精细总结发送给配置的嵌入服务。服务中断后可重试。
 
-`TaskManager.ingest_task(task_id)` 将到达审阅的任务交给 `StageHandlers`，由阶段处理器读取草稿并调用 `RepoManager.ingest_paper()`。成功后任务管理器写回正式论文编号，将审阅阶段标为 `completed`，推进到向量阶段。确认入库会同时采纳候选 taxonomy 定义，已存在的同名定义会复用编号。同一 PDF 按哈希复用已有论文编号。正式索引最后写入，普通写入错误会清理本次产生的附件与分类定义，序号仍保留。入库接口只保存本地资料，向量生成由上层另行触发。
+`TaskManager.submit_action_to_task(task_id, TaskAction.ACCEPT)` 确认审阅后启动独立的 `ingest` 阶段。阶段处理器读取草稿，管理器调用 `RepoManager.ingest_paper()`。成功后工作流将入库标为 `completed`，写回正式论文编号并推进到向量阶段。确认入库会同时采纳候选 taxonomy 定义，已存在的同名定义会复用编号。同一 PDF 按哈希复用已有论文编号。正式索引最后写入，普通写入错误会清理本次产生的附件与分类定义，序号仍保留。向量默认随工作流继续执行。HTTP 入口在返回入库结果后后台调度。

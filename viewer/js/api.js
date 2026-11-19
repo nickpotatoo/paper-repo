@@ -55,6 +55,11 @@ export function createApi(fetcher = (...args) => fetch(...args)) {
       const path = `/api/tasks/${encodeURIComponent(taskId)}`;
       await getTaskResponse(path, password, undefined, 'DELETE');
     },
+    async retryTask(taskId, stage, password) {
+      const path = `/api/tasks/${encodeURIComponent(taskId)}/retry?stage=${encodeURIComponent(stage)}`;
+      const response = await getTaskResponse(path, password, undefined, 'POST');
+      return response.json();
+    },
     async restartTask(taskId, password) {
       const path = `/api/tasks/${encodeURIComponent(taskId)}/restart`;
       const response = await getTaskResponse(path, password, undefined, 'POST');
