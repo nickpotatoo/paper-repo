@@ -125,6 +125,18 @@
       <div id="task-preview-content"></div>
     </div>
   </dialog>
+  <dialog id="task-regenerate-dialog" class="search-dialog" aria-labelledby="task-regenerate-title" aria-describedby="task-regenerate-description">
+    <h2 id="task-regenerate-title"></h2>
+    <form id="task-regenerate-form">
+      <label for="task-regenerate-prompt">附加提示词（可选）</label>
+      <textarea id="task-regenerate-prompt" rows="4" maxlength="2000" autofocus></textarea>
+      <p id="task-regenerate-description">仅用于本次生成，和论文内容一起发送给已配置的大模型。</p>
+      <div class="search-actions">
+        <button id="cancel-task-regenerate" class="action task-secondary" type="button">取消</button>
+        <button class="action" type="submit">开始生成</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="task-ingest-dialog" class="search-dialog task-ingest-dialog" aria-labelledby="task-ingest-title" aria-describedby="task-ingest-description">
     <h2 id="task-ingest-title">确认论文入库</h2>
     <p id="task-ingest-filename"></p>

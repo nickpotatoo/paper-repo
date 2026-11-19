@@ -30,6 +30,7 @@ from src.config import (
     IDLE_TIMEOUT_SECONDS, IDLE_CHECK_INTERVAL_SECONDS,
     VALIDATE_REQUEST_DATA, AUTO_SHUTDOWN, APP_TITLE,
     SERVICE_PASSWORD, NEW_PAPERS_DIR, TASKS_DIR, UPLOAD_MAX_BYTES,
+    REGENERATION_MAX_PROMPT_CHARS, REGENERATION_MAX_REQUEST_BYTES,
 )
 from src.PaperProcessing import TaskManager, UnsupportedRegenerationAction
 from src.RepoManager import (
@@ -158,6 +159,30 @@ async def _parse_search_request(request: Request) -> tuple[str, int]:
     return query.strip(), top_k
 
 
+async def _read_regeneration_prompt(request: Request) -> str:
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > REGENERATION_MAX_REQUEST_BYTES:
+            raise ValueError("请求内容过长")
+        body.extend(chunk)
+    if not body:
+        return ""
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except ValueError:
+        raise ValueError("请求必须是有效的 JSON 对象") from None
+    if not isinstance(payload, dict):
+        raise ValueError("请求必须是 JSON 对象")
+    prompt = payload.get("additional_prompt", "")
+    if not isinstance(prompt, str) or len(prompt) > REGENERATION_MAX_PROMPT_CHARS:
+        raise ValueError(f"附加提示词必须是字符串，最多 {REGENERATION_MAX_PROMPT_CHARS} 字")
+    try:
+        prompt.encode("utf-8")
+    except UnicodeError:
+        raise ValueError("附加提示词包含无效字符") from None
+    return prompt.strip()
+
+
 def _verify_service_password(password: str, *, expected: str = SERVICE_PASSWORD) -> bool:
     """验证服务密码。"""
     if not expected:
@@ -268,12 +293,18 @@ def create_router(
         return _json_response(202 if status == "running" else 200, {"stage_status": status})
 
     @router.post("/api/tasks/{task_id}/regenerate/{action}")
-    def regenerate_task(request: Request, task_id: str, action: str) -> Response:
+    async def regenerate_task(request: Request, task_id: str, action: str) -> Response:
         auth_error = _require_service_password(request)
         if auth_error is not None:
             return auth_error
         try:
-            task = tasks_manager.regenerate_task(task_id, action)
+            additional_prompt = await _read_regeneration_prompt(request)
+        except ValueError as error:
+            return _json_response(400, {"error": str(error)})
+        try:
+            task = await run_in_threadpool(
+                tasks_manager.regenerate_task, task_id, action, additional_prompt=additional_prompt,
+            )
         except UnsupportedRegenerationAction:
             return _json_response(404, {"error": "该任务内容不支持重新生成"})
         except FileNotFoundError:

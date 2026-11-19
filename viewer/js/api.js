@@ -8,9 +8,11 @@ export function createApi(fetcher = (...args) => fetch(...args)) {
     if (!response.ok) throw new Error(`读取失败：${response.status} (${url})`);
     return response.json();
   }
-  async function getTaskResponse(path, password, signal, method = 'GET') {
+  async function getTaskResponse(path, password, signal, method = 'GET', payload) {
+    const headers = {'X-Service-Password':encodeServicePassword(password)};
+    if (payload !== undefined) headers['Content-Type'] = 'application/json';
     const response = await fetcher(path, {
-      method, signal, cache:'no-store', headers:{'X-Service-Password':encodeServicePassword(password)},
+      method, signal, cache:'no-store', headers, body:JSON.stringify(payload),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
@@ -43,9 +45,10 @@ export function createApi(fetcher = (...args) => fetch(...args)) {
       }
       return data.contents;
     },
-    async regenerateTaskContent(taskId, action, password) {
+    async regenerateTaskContent(taskId, action, password, additionalPrompt = '') {
       const path = `/api/tasks/${encodeURIComponent(taskId)}/regenerate/${encodeURIComponent(action)}`;
-      const response = await getTaskResponse(path, password, undefined, 'POST');
+      const payload = additionalPrompt ? {additional_prompt:additionalPrompt} : undefined;
+      const response = await getTaskResponse(path, password, undefined, 'POST', payload);
       return response.json();
     },
     async deleteTask(taskId, password) {

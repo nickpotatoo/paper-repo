@@ -12,15 +12,15 @@ _DRAFT_FIELDS = (
 )
 
 
-def _name_key(name: str) -> str:
+def taxonomy_name_key(name: str) -> str:
     return " ".join(name.split()).casefold()
 
 
-def _ids_by_name(entries: dict) -> dict[str, str]:
+def taxonomy_ids_by_name(entries: dict) -> dict[str, str]:
     ids = {}
     for entry_id, value in entries.items():
         name = value["name"] if isinstance(value, dict) else value
-        ids.setdefault(_name_key(name), entry_id)
+        ids.setdefault(taxonomy_name_key(name), entry_id)
     return ids
 
 
@@ -66,7 +66,7 @@ def _classification_issues(draft: dict, taxonomy: dict, *, reviewing: bool) -> l
             if candidates:
                 report(candidate_field, f"已有 {reference_field} 时不能同时提出对应候选")
 
-        existing_names = _ids_by_name(entries) if reviewing and candidates else {}
+        existing_names = taxonomy_ids_by_name(entries) if reviewing and candidates else {}
         candidate_names = set()
         required_fields = ["name"]
         if kind == "category":
@@ -89,7 +89,7 @@ def _classification_issues(draft: dict, taxonomy: dict, *, reviewing: bool) -> l
                 report(f"{location}.description", "描述仅适用于分类")
             name = candidate.get("name")
             if isinstance(name, str) and name.strip():
-                key = _name_key(name)
+                key = taxonomy_name_key(name)
                 if key in candidate_names:
                     report(f"{location}.name", "候选名称不能重复")
                 if key in existing_names:
@@ -122,11 +122,11 @@ def register_classification(draft: dict, taxonomy: dict, state: dict) -> dict:
             references[reference_field] = selected
             continue
 
-        ids_by_name = _ids_by_name(entries)
+        ids_by_name = taxonomy_ids_by_name(entries)
         candidate_ids = []
         for candidate in candidates:
             name = candidate["name"].strip()
-            entry_id = ids_by_name.get(_name_key(name))
+            entry_id = ids_by_name.get(taxonomy_name_key(name))
             if entry_id is None:
                 counters = state.setdefault("taxonomy_id_counters", {})
                 number = _current_id_number(entries, counters, prefix) + 1

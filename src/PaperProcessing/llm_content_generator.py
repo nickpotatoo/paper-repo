@@ -30,19 +30,30 @@ class LLMContentGenerator:
             raise ValueError("论文原文不能为空")
         return text
 
-    def generate_metadata(self, text: str) -> dict:
-        result = self.client.completion_json(prompts.METADATA, self._text(text))
+    @staticmethod
+    def _with_additional_prompt(user_prompt: str, additional_prompt: str) -> str:
+        if not additional_prompt.strip():
+            return user_prompt
+        return prompts.REGENERATION_REQUEST.format(prompt=additional_prompt.strip(), content=user_prompt)
+
+    def generate_metadata(self, text: str, *, additional_prompt: str = "") -> dict:
+        user_prompt = self._with_additional_prompt(self._text(text), additional_prompt)
+        result = self.client.completion_json(prompts.METADATA, user_prompt)
         return self._content(result, dict)
 
-    def generate_classification(self, text: str, taxonomy: dict) -> dict:
+    def generate_classification(self, text: str, taxonomy: dict, *, additional_prompt: str = "") -> dict:
         if not isinstance(taxonomy, dict):
             raise TypeError("taxonomy 必须为字典")
-        user_prompt = "现有 taxonomy JSON：\n" + json.dumps(taxonomy, ensure_ascii=False) + "\n\n论文原文：\n" + self._text(text)
-        result = self.client.completion_json(prompts.CLASSIFICATION, user_prompt)
+        user_prompt = "正式 taxonomy 与共享缓冲中的临时定义（T- 前缀）：\n" + json.dumps(taxonomy, ensure_ascii=False) + "\n\n论文原文：\n" + self._text(text)
+        result = self.client.completion_json(
+            prompts.CLASSIFICATION, self._with_additional_prompt(user_prompt, additional_prompt),
+        )
         return self._content(result, dict)
 
-    def generate_rough_summary(self, text: str) -> str:
-        return self._content(self.client.completion(prompts.ROUGH_SUMMARY, self._text(text)), str)
+    def generate_rough_summary(self, text: str, *, additional_prompt: str = "") -> str:
+        user_prompt = self._with_additional_prompt(self._text(text), additional_prompt)
+        return self._content(self.client.completion(prompts.ROUGH_SUMMARY, user_prompt), str)
 
-    def generate_detailed_summary(self, text: str) -> str:
-        return self._content(self.client.completion(prompts.DETAILED_SUMMARY, self._text(text)), str)
+    def generate_detailed_summary(self, text: str, *, additional_prompt: str = "") -> str:
+        user_prompt = self._with_additional_prompt(self._text(text), additional_prompt)
+        return self._content(self.client.completion(prompts.DETAILED_SUMMARY, user_prompt), str)

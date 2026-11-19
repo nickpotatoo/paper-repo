@@ -48,16 +48,19 @@
 
 初次处理按 `prepare → deduplicate → extract → metadata → classify → rough_summary → detailed_summary → validate → review` 顺序执行。重新生成由待审阅任务发起，更新该阶段产物与校验报告，随后返回 `review`。任务内容列表为元数据、分类、粗略总结和精细总结分别提供重生成按钮。
 
-分类、标签和文献类型 ID 均来自正式 taxonomy；候选新增定义先确认、分配 ID 并保存后才能被正式记录引用。LLM 输出需校验字段、引用与截断，不编造信息。外发内容遵循用户授权；不将 API 密钥或 PDF 密码写入任务。
+分类生成使用正式 taxonomy 和任务共享缓冲。模型可以直接引用正式或临时分类、标签 ID，文献类型仍使用正式 ID 或单任务候选。LLM 输出需校验字段、引用与截断，不编造信息。外发内容遵循用户授权；不将 API 密钥或 PDF 密码写入任务。
 
-草稿中 `primary_category` 和 `document_type` 分别填写已有 ID；无法复用时填写 `null`，并在相应的 `proposed_categories` 或 `proposed_document_types` 中恰好提供一项候选。分类候选包含非空 `name`、`description` 和 `reason`，文献类型候选包含非空 `name` 和 `reason`。`tags` 只包含已有 ID，新增标签候选保存在 `proposed_tags`，每项包含非空 `name` 和 `reason`。候选不携带正式 ID，名称不得重复或与同类现有定义同名；无候选时数组为空（校验兼容缺省数组）。有效候选产生非阻断警告，可以提交审阅和接受草稿，但接受不代表候选已入库：上层入库前必须经用户确认，分配正式 ID、保存 taxonomy 并将草稿中的候选转换为正式引用。
+模型可以用 `proposed_categories` 和 `proposed_tags` 提交新定义。分类候选包含 `name`、`description` 和 `reason`，标签候选包含 `name` 和 `reason`。候选校验通过后，任务管理器写入共享缓冲，并在草稿中使用 `T-C001` 或 `T-T001` 形式的临时 ID。临时编号按类型独立递增。无合适文献类型时，模型将 `document_type` 设为 `null`，在 `proposed_document_types` 提交一个包含 `name` 和 `reason` 的候选。
+
+任务入库时，其引用的临时定义作为候选交给正式库。正式记录保存后，任务管理器替换当前任务和其他活动任务中的临时引用，然后从缓冲移除已注册条目。同步失败时保留缓冲，重试入库可继续同步。历史快照保留当时的引用。
 
 ## 任务目录
 
 路径为 task 目录内的相对路径，任务根目录待配置；未运行的阶段文件可以不存在。
 
 ```text
-tasks/<task_id>/
+task/taxonomy_buffer.json        # 全部任务共用，首次登记候选时创建
+task/<task_id>/
   task.json                      # 状态和产物索引
   input/source.pdf               # 保持不变的输入副本
   duplicate/result.json          # 哈希和查重结果
@@ -75,7 +78,7 @@ tasks/<task_id>/
   history/                       # 回退后保留的旧产物，按运行编号分目录
 ```
 
-`metadata.json` 包含 `title`、`authors`、`year`、`original_filename`、`filename`、`doi`、`arxiv_id`；后两项为可空的辅助字段。`classification.json` 包含 `primary_category`、`tags`、`document_type`，以及 `proposed_categories`、`proposed_tags`、`proposed_document_types` 候选数组；候选项记录名称、分类描述和审核状态，不将未分配 ID 当作正式引用。PDF 检查和提取 JSON 使用现有模块模型；不存在的内容不伪造。task 中不复制完整正文到状态文件，正式资料和向量仍按配置保存。
+`metadata.json` 包含 `title`、`authors`、`year`、`original_filename`、`filename`、`doi`、`arxiv_id`，后两项为可空的辅助字段。`classification.json` 包含 `primary_category`、`tags`、`document_type` 和可选的 `proposed_document_types`。若引用临时 ID，`pending_categories` 和 `pending_tags` 会附上相应定义，供任务预览。共享缓冲 JSON 包含 `category_index`、`tag_index` 和 `counters`，入库时以其中的条目为准。PDF 检查和提取 JSON 使用现有模块模型。
 
 ## task.json 模型
 
@@ -152,7 +155,7 @@ src/PaperProcessing/
 
 调用路径为上层 → `TaskManager` → `PaperWorkflow` → 阶段处理与校验。工作流通过 TaskManager 读写任务文件。
 
-调用方通过 `TaskManager.create_task(source)` 创建任务，通过 `run_task(task_id)` 执行，通过 `get_status(task_id)` 查询。待审阅且未入库时可调用 `regenerate_task(task_id, action)`，完成后返回待审阅。
+调用方通过 `TaskManager.create_task(source)` 创建任务，通过 `run_task(task_id)` 执行，通过 `get_status(task_id)` 查询。待审阅且未入库时可调用 `regenerate_task(task_id, action, additional_prompt="")`，完成后返回待审阅。重新生成接口 `POST /api/tasks/{task_id}/regenerate/{action}` 接受可选的 JSON 字段 `additional_prompt`。提示词仅随当前操作传给模型，最大长度见 `REGENERATION_MAX_PROMPT_CHARS`。
 
 ## 模块内部接口草案
 
@@ -169,8 +172,8 @@ src/PaperProcessing/
 
 ```python
 class PaperWorkflow:
-    def run(self, task: Task) -> Task: ...
-    def submit_review(self, task: Task, action: ReviewAction) -> Task: ...
+    def run(self, task: Task, *, additional_prompt: str = "") -> Task: ...
+    def submit_review(self, task: Task, action: ReviewAction, *, additional_prompt: str = "") -> Task: ...
 ```
 
 TaskManager 加载任务并将其交给工作流，通过同步的 `on_transition` 处理每次状态变化。TaskManager 更新时间并保存 `task.json`，保存成功后才发送状态快照。`run` 运行至等待、失败、重复或完成后返回，`submit_review` 执行待审阅任务的操作。
@@ -225,10 +228,10 @@ class PaperExtractor(Protocol):
     def export_markdown(self, document: ExtractedDocument, *, include_locations: bool = True) -> str: ...
 
 class ContentGenerator(Protocol):
-    def generate_metadata(self, text: str) -> dict: ...
-    def generate_classification(self, text: str, taxonomy: dict) -> dict: ...
-    def generate_rough_summary(self, text: str) -> str: ...
-    def generate_detailed_summary(self, text: str) -> str: ...
+    def generate_metadata(self, text: str, *, additional_prompt: str = "") -> dict: ...
+    def generate_classification(self, text: str, taxonomy: dict, *, additional_prompt: str = "") -> dict: ...
+    def generate_rough_summary(self, text: str, *, additional_prompt: str = "") -> str: ...
+    def generate_detailed_summary(self, text: str, *, additional_prompt: str = "") -> str: ...
 
 class StatusCallback(Protocol):
     def __call__(self, update: TaskStatusUpdate) -> None: ...

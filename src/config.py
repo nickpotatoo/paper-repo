@@ -63,6 +63,8 @@ SEARCH_MAX_REQUEST_BYTES = 32768    # JSON 请求正文上限，单位为字节�
 SEARCH_MAX_QUERY_CHARS = 4000       # 查询字符串上限，按 Python 字符数计算。
 SEARCH_MIN_TOP_K = 1
 SEARCH_MAX_TOP_K = 100
+REGENERATION_MAX_PROMPT_CHARS = 2000  # 查看器输入框的 maxlength 同样固定为 2000。
+REGENERATION_MAX_REQUEST_BYTES = 32768  # 重新生成 JSON 请求体的字节上限。
 TOP_K = 5                          # 后端共用默认值；前端 HTML 的默认数量独立写死为 5。
 
 # ── 嵌入服务 ───────────────────────────────────────────────────

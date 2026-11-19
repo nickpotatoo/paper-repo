@@ -30,7 +30,8 @@ const fieldNames = {
   title:'标题', authors:'作者', year:'年份', filename:'文件名', original_filename:'原始文件名',
   primary_category:'主分类', document_type:'文献类型', tags:'标签',
   proposed_categories:'候选分类', proposed_tags:'候选标签', proposed_document_types:'候选文献类型',
-  name:'名称', description:'描述', issues:'问题', severity:'级别', message:'说明',
+  pending_categories:'待入库分类', pending_tags:'待入库标签',
+  name:'名称', description:'描述', reason:'理由', issues:'问题', severity:'级别', message:'说明',
   status:'状态', page_count:'页数', duplicate_of:'匹配论文',
 };
 
@@ -123,6 +124,10 @@ export function setupTasks(api, onIngest = () => {}) {
   const previewStatus = document.querySelector('#task-preview-status');
   const previewBody = document.querySelector('#task-preview-body');
   const previewContent = document.querySelector('#task-preview-content');
+  const regenerateDialog = document.querySelector('#task-regenerate-dialog');
+  const regenerateTitle = document.querySelector('#task-regenerate-title');
+  const regenerateForm = document.querySelector('#task-regenerate-form');
+  const regeneratePrompt = document.querySelector('#task-regenerate-prompt');
   const ingestDialog = document.querySelector('#task-ingest-dialog');
   const ingestFilename = document.querySelector('#task-ingest-filename');
   const ingestStatus = document.querySelector('#task-ingest-status');
@@ -147,6 +152,7 @@ export function setupTasks(api, onIngest = () => {}) {
   let tasks = [];
   let selectedForIngest = null;
   let managementSelection = null;
+  let regenerationKey = null;
   const expandedTasks = new Set();
   const generatingTasks = new Set();
   const regeneratingTasks = new Set();
@@ -288,6 +294,7 @@ export function setupTasks(api, onIngest = () => {}) {
     contentRequest = null;
     previewTrigger = null;
     if (preview.open) preview.close();
+    if (regenerateDialog.open) regenerateDialog.close();
     clearPreview();
     contentsList.replaceChildren();
     availableContents = [];
@@ -381,7 +388,7 @@ export function setupTasks(api, onIngest = () => {}) {
     }).join('');
   }
 
-  async function regenerateContent(key) {
+  async function regenerateContent(key, additionalPrompt) {
     const id = activeTask;
     if (!id || !password.value || regeneratingTasks.has(id) || !Object.hasOwn(contentActions, key)) return;
     const {id:action, label, success} = contentActions[key];
@@ -392,7 +399,7 @@ export function setupTasks(api, onIngest = () => {}) {
     let error;
     let result;
     try {
-      result = await api.regenerateTaskContent(id, action, password.value);
+      result = await api.regenerateTaskContent(id, action, password.value, additionalPrompt);
     } catch (failure) {
       error = failure;
     } finally {
@@ -416,10 +423,28 @@ export function setupTasks(api, onIngest = () => {}) {
     contentStatus.textContent = error ? error.message : success;
   }
 
+  document.querySelector('#cancel-task-regenerate').addEventListener('click', () => regenerateDialog.close());
+  regenerateDialog.addEventListener('close', () => {
+    if (regenerateDialog.open) return;
+    regenerationKey = null;
+    regenerateForm.reset();
+  });
+  regenerateForm.addEventListener('submit', event => {
+    event.preventDefault();
+    if (!regenerateDialog.open || !regenerationKey) return;
+    const key = regenerationKey;
+    const additionalPrompt = regeneratePrompt.value.trim();
+    regenerateDialog.close();
+    regenerateContent(key, additionalPrompt);
+  });
+
   contentsList.addEventListener('click', async event => {
     const regenerate = event.target.closest('[data-regenerate-key]');
     if (regenerate && !regenerate.disabled) {
-      await regenerateContent(regenerate.dataset.regenerateKey);
+      regenerationKey = regenerate.dataset.regenerateKey;
+      regenerateTitle.textContent = contentActions[regenerationKey].label;
+      regenerateForm.reset();
+      regenerateDialog.showModal();
       return;
     }
     const button = event.target.closest('[data-content-key]');

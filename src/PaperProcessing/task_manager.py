@@ -1,5 +1,6 @@
 """任务运行入口及任务文件管理。"""
 
+import json
 import logging
 import os
 import re
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.hash_duplicate import hash_file
+from . import taxonomy_buffer
 from .models import StageRecord, Task, TaskSource, TaskStatusUpdate
 
 
@@ -89,14 +91,14 @@ class TaskManager:
     def get_status(self, task_id: str) -> TaskStatusUpdate:
         return TaskStatusUpdate.from_task(self.load(task_id))
 
-    def regenerate_task(self, task_id: str, action: str) -> Task:
+    def regenerate_task(self, task_id: str, action: str, *, additional_prompt: str = "") -> Task:
         from .workflow import REGENERATION_ACTIONS
 
         if action not in REGENERATION_ACTIONS:
             raise UnsupportedRegenerationAction(action)
         with TASK_OPERATION_LOCK:
             task = self.load(task_id)
-            return self._workflow().submit_review(task, action)
+            return self._workflow().submit_review(task, action, additional_prompt=additional_prompt)
 
     def artifact_path(self, task_id: str, path: str = "") -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id):
@@ -246,6 +248,7 @@ class TaskManager:
                 raise ValueError("任务须到达审阅阶段才能入库")
             handlers = StageHandlers(self, papers_path=self.papers_path, taxonomy_path=self.taxonomy_path)
             paper_id = handlers.ingest(task, handlers.repo)
+            self._promote_classification_ids(handlers.repo.get_taxonomy())
             if task.paper_id is None:
                 task.paper_id = paper_id
                 self._set_vector_stage(task, "pending")
@@ -256,6 +259,53 @@ class TaskManager:
                 review.error = None
                 self.save(task)
             return paper_id
+
+    def read_classification_buffer(self) -> dict:
+        path = self.root / taxonomy_buffer.BUFFER_FILENAME
+        if path.resolve() != path:
+            raise ValueError("分类缓冲文件不能指向其他位置")
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return taxonomy_buffer.empty_buffer()
+
+    def buffer_classification(self, draft: dict, taxonomy: dict) -> dict:
+        with TASK_OPERATION_LOCK:
+            pending = self.read_classification_buffer()
+            previous_counters = dict(pending["counters"])
+            draft = taxonomy_buffer.buffer_classification(draft, taxonomy, pending)
+            if pending["counters"] != previous_counters:
+                self._write_classification_buffer(pending)
+            return draft
+
+    def _promote_classification_ids(self, taxonomy: dict) -> None:
+        pending = self.read_classification_buffer()
+        promoted, remaining = taxonomy_buffer.partition_registered_ids(pending, taxonomy)
+        if not promoted:
+            return
+
+        for path in sorted(self.root.glob("*/task.json")):
+            task_id = path.parent.name
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id):
+                continue
+            artifact = taxonomy_buffer.CLASSIFICATION_ARTIFACT
+            try:
+                draft = json.loads(self.read_artifact(task_id, artifact))
+            except (FileNotFoundError, UnicodeError, json.JSONDecodeError):
+                continue
+            updated = taxonomy_buffer.replace_registered_ids(draft, promoted, remaining)
+            if updated != draft:
+                self._write_artifact(task_id, artifact, self._json_bytes(updated))
+
+        # 保留映射来源直到全部任务都改写成功，供入库重试。
+        self._write_classification_buffer(remaining)
+
+    def _write_classification_buffer(self, pending: dict) -> None:
+        self._write_file(self.root / taxonomy_buffer.BUFFER_FILENAME, self._json_bytes(pending))
+
+    @staticmethod
+    def _json_bytes(data: dict) -> bytes:
+        return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
     def generate_vector(self, task_id: str) -> str:
         """调度向量阶段，并持久化任务状态。"""
@@ -345,7 +395,10 @@ class TaskManager:
             raise
 
     def _write_artifact(self, task_id: str, path: str, data: bytes) -> None:
-        target = self.artifact_path(task_id, path)
+        self._write_file(self.artifact_path(task_id, path), data)
+
+    @staticmethod
+    def _write_file(target: Path, data: bytes) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         staged = None
         try:

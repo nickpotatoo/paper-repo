@@ -57,7 +57,7 @@ class PaperWorkflow:
         self.storage.publish_artifacts(task.task_id, {'validation/report.json': report.model_dump_json(indent=2)})
         return report
 
-    def run(self, task: Task) -> Task:
+    def run(self, task: Task, *, additional_prompt: str = "") -> Task:
         can_run = (
             task.status not in ('completed', 'duplicate', 'cancelled', 'waiting')
             and task.current_stage not in ('review', 'vectorize')
@@ -86,7 +86,10 @@ class PaperWorkflow:
                         raise ValueError('草稿校验未通过')
                 else:
                     actual = _REGEN.get(stage, stage)
-                    outputs = self.handlers.execute(actual, task)
+                    if stage in _REGEN and additional_prompt:
+                        outputs = self.handlers.execute(actual, task, additional_prompt=additional_prompt)
+                    else:
+                        outputs = self.handlers.execute(actual, task)
                     duplicate = outputs.pop('_duplicate', None)
                     for path, content in outputs.items():
                         if not isinstance(content, str) or not content.strip():
@@ -123,7 +126,7 @@ class PaperWorkflow:
                 break
         return task
 
-    def submit_review(self, task: Task, action: ReviewAction) -> Task:
+    def submit_review(self, task: Task, action: ReviewAction, *, additional_prompt: str = "") -> Task:
         if task.paper_id is not None or task.status != 'waiting' or task.current_stage != 'review':
             raise ValueError('任务未处于审阅状态')
         if action == 'cancel':
@@ -138,4 +141,4 @@ class PaperWorkflow:
         else:
             raise ValueError('未知审阅操作')
         self.on_transition(task)
-        return self.run(task) if action in _REGEN else task
+        return self.run(task, additional_prompt=additional_prompt) if action in _REGEN else task

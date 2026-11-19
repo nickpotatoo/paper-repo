@@ -10,6 +10,7 @@ from src.hash_duplicate import hash_file
 from src.config import PAPERS_PATH, TAXONOMY_PATH
 from src.RepoManager import RepoManager, load_papers
 from src.SemanticSearch.paper_vector_service import PaperVectorService
+from . import taxonomy_buffer
 from .models import Task
 from .validation import validate_draft
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _DRAFT_ARTIFACTS = {
     "metadata": "analysis/metadata.json",
-    "classification": "analysis/classification.json",
+    "classification": taxonomy_buffer.CLASSIFICATION_ARTIFACT,
     "rough_summary": "analysis/rough_summary.txt",
     "detailed_summary": "analysis/detailed_summary.md",
 }
@@ -66,7 +67,7 @@ class StageHandlers:
     def taxonomy(self):
         return self.repo.get_taxonomy()
 
-    def execute(self, stage: str, task: Task):
+    def execute(self, stage: str, task: Task, *, additional_prompt: str = ""):
         if stage == "vectorize":
             self._execute_vector(task)
             return {}
@@ -95,16 +96,21 @@ class StageHandlers:
                 raise ValueError('PDF 提取文本为空')
             return {'extraction/pdf_info.json': info.model_dump_json(), 'extraction/extraction.json': result.model_dump_json(), 'extraction/quality.json': result.quality.model_dump_json() if result.quality else '{}', 'extraction/extracted.md': text}
         text = self.storage.read_artifact(task.task_id, 'extraction/extracted.md').decode('utf-8')
+        prompt_options = {"additional_prompt": additional_prompt} if additional_prompt else {}
         if stage == 'metadata':
-            data = dict(self.generator.generate_metadata(text))
+            data = dict(self.generator.generate_metadata(text, **prompt_options))
             data['original_filename'] = task.source.original_filename
             return {'analysis/metadata.json': json.dumps(data, ensure_ascii=False)}
         if stage == 'classify':
-            return {'analysis/classification.json': json.dumps(self.generator.generate_classification(text, self.taxonomy()), ensure_ascii=False)}
+            taxonomy = self.taxonomy()
+            context = taxonomy_buffer.taxonomy_with_pending(taxonomy, self.storage.read_classification_buffer())
+            draft = self.generator.generate_classification(text, context, **prompt_options)
+            draft = self.storage.buffer_classification(draft, taxonomy)
+            return {taxonomy_buffer.CLASSIFICATION_ARTIFACT: json.dumps(draft, ensure_ascii=False, indent=2)}
         if stage == 'rough_summary':
-            return {'analysis/rough_summary.txt': self.generator.generate_rough_summary(text)}
+            return {'analysis/rough_summary.txt': self.generator.generate_rough_summary(text, **prompt_options)}
         if stage == 'detailed_summary':
-            return {'analysis/detailed_summary.md': self.generator.generate_detailed_summary(text)}
+            return {'analysis/detailed_summary.md': self.generator.generate_detailed_summary(text, **prompt_options)}
         if stage == 'vectorize':
             self._execute_vector(task)
             return {}
@@ -125,7 +131,8 @@ class StageHandlers:
         return draft
 
     def validate(self, task, *, replacements: dict[str, str] | None = None):
-        return validate_draft(self.draft(task, replacements=replacements), self.taxonomy())
+        taxonomy = taxonomy_buffer.taxonomy_with_pending(self.taxonomy(), self.storage.read_classification_buffer())
+        return validate_draft(self.draft(task, replacements=replacements), taxonomy)
 
     def ingest(self, task: Task, manager: RepoManager) -> str:
         if task.paper_id is not None:
@@ -149,7 +156,9 @@ class StageHandlers:
 
         return manager.ingest_paper(
             source, sha256=task.source.sha256, original_filename=task.source.original_filename,
-            metadata=draft["metadata"], classification=draft["classification"],
+            metadata=draft["metadata"], classification=taxonomy_buffer.pending_as_proposals(
+                draft["classification"], self.storage.read_classification_buffer(),
+            ),
             summary=draft["rough_summary"], detailed_summary=draft["detailed_summary"],
         )
 
