@@ -16,20 +16,20 @@ ANALYSIS_STAGES = (
 class TaskAction(str, Enum):
     """任务入口接受的动作。内部阶段事件另见 WorkflowEvent。"""
 
-    # 待审阅时进入对应的重生成阶段，结束后回到审阅。
+    # 待审阅时进入对应的重生成阶段，成功后回到审阅。
     REGENERATE_METADATA = "regenerate_metadata"
     REGENERATE_CLASSIFICATION = "regenerate_classification"
     REGENERATE_ROUGH_SUMMARY = "regenerate_rough_summary"
     REGENERATE_DETAILED_SUMMARY = "regenerate_detailed_summary"
 
-    # 完成审阅并进入入库；也可重试失败的入库。
+    # 完成审阅并进入入库。
     ACCEPT = "accept"
-    # 正式入库完成后启动向量生成，失败后进入重试阶段。
+    # 正式入库完成后启动向量生成。
     GENERATE_VECTOR = "generate_vector"
-    # 工作流内部入口：取消待审阅任务，或从失败/中断的阶段恢复。
+    # 工作流内部入口：取消待审阅任务，或恢复等待核对的中断阶段。
     CANCEL = "cancel"
     RESUME = "resume"
-    # 用户入口：重试指定的失败阶段。
+    # 用户入口：重试当前失败阶段。
     RETRY = "retry"
     # 任务管理入口：从头重跑，或归档并移出任务列表。
     RESTART = "restart"
@@ -46,9 +46,8 @@ USER_TASK_ACTIONS = (
     TaskAction.RETRY, TaskAction.RESTART, TaskAction.ARCHIVE,
 )
 WorkflowEvent = TaskAction | Literal["start", "success", "failure", "startup_failure", "interrupted", "duplicate"]
-VECTOR_STAGES = ("vectorize", "retry_vectorize")
 FINISHED_STAGE = "finished"
-STAGES = (*ANALYSIS_STAGES, "review", "ingest", *VECTOR_STAGES, *REGENERATION_STAGES, FINISHED_STAGE)
+STAGES = (*ANALYSIS_STAGES, "review", "ingest", "vectorize", *REGENERATION_STAGES, FINISHED_STAGE)
 TaskStatus = Literal["pending", "running", "action_required", "failed", "finished"]
 TaskOutcome = Literal["completed", "duplicate", "cancelled"]
 StageStatus = Literal["pending", "running", "action_required", "failed", "completed", "skipped"]

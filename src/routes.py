@@ -255,7 +255,6 @@ def create_router(
                 "duplicate_of": task.duplicate_of,
                 "paper_id": task.paper_id,
                 "allowed_actions": tasks_manager.allowed_actions(task),
-                "retryable_stages": tasks_manager.retryable_stages(task),
                 "stages": {
                     name: {
                         "status": stage.status,
@@ -292,14 +291,12 @@ def create_router(
         return _json_response(200, {"paper_id": paper_id})
 
     @router.post("/api/tasks/{task_id}/retry")
-    def retry_task(request: Request, task_id: str, stage: str, background_tasks: BackgroundTasks) -> Response:
+    def retry_task(request: Request, task_id: str, background_tasks: BackgroundTasks) -> Response:
         auth_error = _require_service_password(request)
         if auth_error is not None:
             return auth_error
         try:
-            task = tasks_manager.submit_action_to_task(
-                task_id, TaskAction.RETRY, retry_stage=stage, stop_before="vectorize" if stage == "ingest" else None,
-            )
+            task, stage = tasks_manager.retry_task(task_id)
         except FileNotFoundError:
             return _json_response(404, {"error": "任务不存在"})
         except ValueError as error:
@@ -307,12 +304,12 @@ def create_router(
         except (OSError, RuntimeError) as error:
             logger.warning("重试任务失败：%s", type(error).__name__)
             return _json_response(503, {"error": "无法重试任务，请检查服务端配置或文件"})
-        retried = task.stages["retry_vectorize" if stage == "vectorize" else stage]
+        retried = task.stages[stage]
         if retried.status == "failed":
             return _json_response(503, {"error": "该阶段重试失败，请查看任务状态", "stage_status": retried.status})
         if stage == "ingest" and task.paper_id is not None:
             background_tasks.add_task(run_queued_task, task_id)
-        return _json_response(200, {"stage_status": retried.status, "paper_id": task.paper_id})
+        return _json_response(200, {"stage": stage, "stage_status": retried.status, "paper_id": task.paper_id})
 
     @router.post("/api/tasks/{task_id}/vector")
     def generate_task_vector(request: Request, task_id: str) -> Response:

@@ -127,7 +127,7 @@ class TaskManager:
 
     def submit_action_to_task(
         self, task_id: str, action: TaskAction | str, *,
-        additional_prompt: str = "", stop_before: str | None = None, retry_stage: str | None = None,
+        additional_prompt: str = "", stop_before: str | None = None,
     ) -> Task:
         """提交工作流动作，保存状态，再接着运行任务。"""
         action = TaskAction(action)
@@ -138,9 +138,11 @@ class TaskManager:
                     self.repo.get_paper(task.paper_id)
                 except KeyError:
                     raise ValueError("该任务关联的论文已从资料库移除") from None
-            updated = PaperWorkflow.submit_action(task, action, retry_stage=retry_stage)
-            if updated is not task:
-                self._save_task(updated)
+            transition = PaperWorkflow.next_state(task.current_stage, task.status, action)
+            if not transition.stage_statuses:
+                return task
+            PaperWorkflow.apply_transition(task, transition)
+            self._save_task(task)
             return self.run_task(
                 task_id, additional_prompt=additional_prompt, stop_before=stop_before,
                 raise_on_error_at="ingest" if action == TaskAction.ACCEPT else None,
@@ -176,9 +178,18 @@ class TaskManager:
     def allowed_actions(task: Task) -> list[TaskAction]:
         return PaperWorkflow.allowed_actions(task)
 
-    @staticmethod
-    def retryable_stages(task: Task) -> list[str]:
-        return PaperWorkflow.retryable_stages(task)
+    def retry_task(self, task_id: str) -> tuple[Task, str]:
+        with _TASK_OPERATION_LOCK:
+            task = self.get_task(task_id)
+            if task.status == "running":
+                task = self.run_task(task_id)
+            stage = task.current_stage
+            if stage is None:
+                raise ValueError("当前任务没有可重试阶段")
+            task = self.submit_action_to_task(
+                task_id, TaskAction.RETRY, stop_before="vectorize" if stage == "ingest" else None,
+            )
+            return task, stage
 
     def artifact_path(self, task_id: str, path: str = "") -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id):

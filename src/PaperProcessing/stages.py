@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 from src.RepoManager import load_papers
 from src.hash_duplicate import hash_file
 from . import taxonomy_buffer
-from .models import VECTOR_STAGES, IngestDraft, StageResult, Task, ValidationReport
+from .models import IngestDraft, StageResult, Task, ValidationReport
 from .validation import VALIDATION_ARTIFACT, validate_draft
 
 if TYPE_CHECKING:
@@ -79,7 +79,7 @@ class StageHandlers:
             )
         if stage == "ingest":
             return StageResult(ingest=self._prepare_ingest(task))
-        if stage in VECTOR_STAGES:
+        if stage == "vectorize":
             self._execute_vector(task)
             return StageResult()
 
@@ -164,9 +164,6 @@ class StageHandlers:
         return validate_draft(draft, taxonomy_buffer.taxonomy_with_pending(self.repo.get_taxonomy(), pending))
 
     def _prepare_ingest(self, task: Task) -> IngestDraft:
-        review = task.stages.get("review")
-        if review is None or review.status != "completed":
-            raise ValueError("审阅完成后才能入库")
         if task.source.sha256 is None:
             raise ValueError("任务缺少原始 PDF 哈希")
         try:
@@ -209,12 +206,6 @@ class StageHandlers:
         paper_id = task.paper_id
         if paper_id is None:
             raise ValueError("论文尚未入库")
-        review = task.stages.get("review")
-        if review is None or review.status != "completed":
-            raise ValueError("审阅完成后才能生成向量")
-        ingest = task.stages.get("ingest")
-        if ingest is not None and ingest.status != "completed":
-            raise ValueError("入库完成后才能生成向量")
         try:
             paper = self.repo.get_paper(paper_id)
         except KeyError:

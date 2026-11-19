@@ -35,14 +35,14 @@ JSON 和 Markdown 使用 UTF-8。JSON 字段使用英文 snake_case。保留原�
 
 - 脚本先调用 `TaskManager.create_task(pdf_path)` 创建或复用任务，再调用 `run_task(task_id)`。运行会逐阶段保存产物，在待审阅、失败或终态停下。查询完整记录用 `get_task(task_id)`。
 - 到达 `review/action_required` 后，预览并核对草稿。元数据、分类与标签、粗略总结、精细总结可以分别重生成。附加提示词只用于本次生成。确认入库用 `submit_action_to_task(task_id, TaskAction.ACCEPT)`。
-- 阶段失败时，先看阶段的错误或校验报告，再用界面的「重试：阶段名」，或调用 `submit_action_to_task(task_id, TaskAction.RETRY, retry_stage=stage)`。分析、入库从失败阶段继续；向量进入 `retry_vectorize`，保留首次失败记录；单项重生成失败时可在审阅中重试该项。
+- 阶段失败时，先看阶段的错误或校验报告，再用界面的「重试：阶段名」，或调用 `submit_action_to_task(task_id, TaskAction.RETRY)`。重试始终执行当前失败阶段。单项重生成成功后回到审阅。
 - 「重新执行」只适用于未入库的任务，会归档旧产物并从原始 PDF 开始。「删除任务」会归档任务目录，正式入库的论文、附件和向量仍保留。
 
 ### 维护流水线代码
 
 维持 `route → TaskManager → PaperWorkflow` 的调用边界。路由负责认证、HTTP 响应和后台调度；管理器负责创建任务、运行阶段、提交动作以及保存状态和产物；工作流负责动作资格与状态转移；阶段处理器负责具体处理、内容校验和向量生成。
 
-任务状态是 `pending`、`running`、`action_required`、`failed` 和 `finished`。结束结果通过 `outcome` 区分完成、重复与取消。阶段自己的状态可与任务不同，例如向量阶段失败时，阶段为 `failed`，任务为 `action_required`。前端用 `allowed_actions` 和 `retryable_stages` 决定显示哪些操作。修改动作或状态时，同步核对工作流、管理器接口、路由、前端和 [PaperProcessing 文档](src/PaperProcessing/README.md)。
+任务状态是 `pending`、`running`、`action_required`、`failed` 和 `finished`。结束结果通过 `outcome` 区分完成、重复与取消。执行失败时，任务与当前阶段均记为 `failed`。前端根据 `allowed_actions` 显示操作。修改动作或状态时，同步核对工作流、管理器接口、路由和前端。
 
 ## 3. 分类、标签和文献类型
 
@@ -78,7 +78,7 @@ JSON 和 Markdown 使用 UTF-8。JSON 字段使用英文 snake_case。保留原�
 
 ## 6. 向量与检索
 
-查看器确认入库后返回论文编号，再在后台执行 `vectorize`。入库成功后核对向量阶段是否完成；失败时按失败阶段名重试，向量重试进入 `retry_vectorize`。用户要求暂缓生成时，使用 `TaskManager.submit_action_to_task(task_id, TaskAction.ACCEPT, stop_before="vectorize")`。独立整理时复用同一个 `PaperVectorService`，逐篇调用 `create_vector(index=paper_id)` 并检查返回项中的 `paper_id` 和 `saved`。省略 `index` 会处理全库。
+查看器确认入库后返回论文编号，再在后台执行 `vectorize`。入库成功后核对向量阶段是否完成，失败时重试当前 `vectorize` 阶段。用户要求暂缓生成时，使用 `TaskManager.submit_action_to_task(task_id, TaskAction.ACCEPT, stop_before="vectorize")`。独立整理时复用同一个 `PaperVectorService`，逐篇调用 `create_vector(index=paper_id)` 并检查返回项中的 `paper_id` 和 `saved`。省略 `index` 会处理全库。
 
 向量请求会将概述、精细总结及题名、文献类型、标签等上下文发送给配置的嵌入服务。按用户授权执行。用户要求暂不生成时，报告跳过的编号。服务失败时保留已入库资料并记录失败原因。`saved=True` 可表示成功保存或已有向量无需改写。概述、精细总结或嵌入上下文更新后，按对应编号刷新向量。
 

@@ -17,7 +17,6 @@ const stages = {
   classify:'生成分类', rough_summary:'生成粗略总结', detailed_summary:'生成精细总结',
   validate:'校验草稿', review:'审阅', ingest:'入库', vectorize:'生成向量', regenerate_classification:'重新生成分类',
   finished:'任务完成',
-  retry_vectorize:'重试生成向量',
   regenerate_metadata:'重新生成元数据',
   regenerate_rough_summary:'重新生成粗略总结', regenerate_detailed_summary:'重新生成精细总结',
 };
@@ -25,7 +24,6 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
   timeZone:'Asia/Shanghai', dateStyle:'medium', timeStyle:'medium',
 });
 const timestamp = value => Date.parse(value) || 0;
-const isVectorStage = stage => stage === 'vectorize' || stage === 'retry_vectorize';
 const contentActions = {
   metadata: {id:'regenerate_metadata', label:'重新生成元数据', success:'论文元数据已更新。'},
   classification: {id:'regenerate_classification', label:'重新生成分类', success:'论文分类已更新。'},
@@ -62,12 +60,12 @@ function renderTask(task, expanded, generating, retrying) {
   const currentStage = task.current_stage;
   const vectorStatus = generating ? 'running' : task.stages?.[currentStage]?.status;
   const taskStatus = generating || retrying ? 'running' : task.status;
-  const retryStages = canAct(task, 'retry') ? task.retryable_stages ?? [] : [];
+  const canRetry = canAct(task, 'retry');
   const stageRecords = Object.entries(task.stages ?? {}).filter(([id, stage]) =>
-    (!isVectorStage(id) || task.paper_id) &&
+    (id !== 'vectorize' || task.paper_id) &&
     (id !== 'finished' || id === currentStage) &&
     (id !== 'ingest' || stage?.status !== 'pending' || id === currentStage) &&
-    (!(id.startsWith('regenerate_') || id === 'retry_vectorize') ||
+    (!id.startsWith('regenerate_') ||
       stage?.status !== 'pending' || id === currentStage),
   );
   const active = task.stages?.[currentStage];
@@ -75,7 +73,7 @@ function renderTask(task, expanded, generating, retrying) {
   let state = taskStatus === 'finished' && task.outcome
     ? label(outcomes, task.outcome) : label(taskStatuses, taskStatus);
   if (taskStatus === 'action_required' && task.current_stage === 'review') state = '待审阅';
-  if (taskStatus === 'pending' && isVectorStage(currentStage)) state = '等待生成向量';
+  if (taskStatus === 'pending' && currentStage === 'vectorize') state = '等待生成向量';
   const details = stageRecords.map(([id, stage]) => {
     const vectorRunning = id === currentStage && generating;
     const note = vectorRunning ? null : stage?.error?.message || stage?.wait_reason;
@@ -108,11 +106,12 @@ function renderTask(task, expanded, generating, retrying) {
       ${canAct(task, 'restart') ? '<button class="action task-secondary" type="button" data-manage-action="restart" aria-haspopup="dialog">重新执行</button>' : ''}
       ${canAct(task, 'archive') ? '<button class="action task-secondary task-delete" type="button" data-manage-action="delete" aria-haspopup="dialog">删除任务</button>' : ''}
       </div>
-      ${canAct(task, 'accept') && !retryStages.includes(currentStage)
+      ${canAct(task, 'accept') && !canRetry
         ? `<button class="action" type="button" data-ingest-task="${esc(task.task_id)}" aria-haspopup="dialog">${currentStage === 'ingest' && active?.status === 'failed' ? '重试入库' : '入库'}</button>` : ''}
-      ${(canAct(task, 'generate_vector') && !retryStages.includes(currentStage)) || generating
+      ${(canAct(task, 'generate_vector') && !canRetry) || generating
         ? `<button class="action" type="button" data-vector-task="${esc(task.task_id)}"${vectorStatus === 'running' ? ' disabled' : ''}>${vectorStatus === 'running' ? '生成中…' : vectorStatus === 'failed' ? '重试生成向量' : '启动向量生成'}</button>` : ''}
-      ${retryStages.map(stage => `<button class="action" type="button" data-retry-stage="${esc(stage)}"${retrying ? ' disabled' : ''}>${retrying ? '重试中…' : `重试：${label(stages, stage)}`}</button>`).join('')}
+      ${canRetry
+        ? `<button class="action" type="button" data-retry-task${retrying ? ' disabled' : ''}>${retrying ? '重试中…' : `重试：${label(stages, currentStage)}`}</button>` : ''}
     </div>
   </details>`;
 }
@@ -239,7 +238,7 @@ export function setupTasks(api, onIngest = () => {}) {
       } else {
         const restarted = await api.restartTask(id, password.value);
         const task = tasks.find(item => item.task_id === id);
-        if (task) Object.assign(task, restarted, {stages:{}, duplicate_of:null, outcome:null, allowed_actions:['restart', 'archive'], retryable_stages:[]});
+        if (task) Object.assign(task, restarted, {stages:{}, duplicate_of:null, outcome:null, allowed_actions:['restart', 'archive']});
       }
       manageDialog.close();
       refreshStatusOptions();
@@ -521,19 +520,18 @@ export function setupTasks(api, onIngest = () => {}) {
   }
 
   list.addEventListener('click', async event => {
-    const retryButton = event.target.closest('[data-retry-stage]');
+    const retryButton = event.target.closest('[data-retry-task]');
     if (retryButton && password.value && !refreshButton.disabled) {
       const taskId = retryButton.closest('[data-task-id]').dataset.taskId;
-      const stage = retryButton.dataset.retryStage;
       const task = tasks.find(item => item.task_id === taskId);
-      if (!canAct(task, 'retry') || !task.retryable_stages?.includes(stage) || retryingTasks.has(taskId)) return;
+      if (!canAct(task, 'retry') || retryingTasks.has(taskId)) return;
       retryingTasks.add(taskId);
       refreshStatusOptions();
       renderList();
       let error;
       try {
-        const result = await api.retryTask(taskId, stage, password.value);
-        if (stage === 'ingest' && result.paper_id) onIngest();
+        const result = await api.retryTask(taskId, password.value);
+        if (result.stage === 'ingest' && result.paper_id) onIngest();
       } catch (failure) {
         error = failure;
       } finally {
