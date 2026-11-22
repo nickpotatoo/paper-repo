@@ -25,6 +25,7 @@ _DRAFT_ARTIFACTS = {
     "rough_summary": "analysis/rough_summary.txt",
     "detailed_summary": "analysis/detailed_summary.md",
 }
+_EXTRACTED_MARKDOWN = "extraction/extracted.md"
 _REGENERATION_INPUTS = {
     "regenerate_metadata": "metadata", "regenerate_classification": "classify",
     "regenerate_rough_summary": "rough_summary", "regenerate_detailed_summary": "detailed_summary",
@@ -118,11 +119,11 @@ class StageHandlers:
             "extraction/pdf_info.json": info.model_dump_json(),
             "extraction/extraction.json": result.model_dump_json(),
             "extraction/quality.json": result.quality.model_dump_json() if result.quality else "{}",
-            "extraction/extracted.md": text,
+            _EXTRACTED_MARKDOWN: text,
         })
 
     def _generate(self, stage: str, task: Task, additional_prompt: str = "") -> StageResult:
-        text = self.inputs.read_artifact(task.task_id, "extraction/extracted.md").decode("utf-8")
+        text = self.inputs.read_artifact(task.task_id, _EXTRACTED_MARKDOWN).decode("utf-8")
         options = {"additional_prompt": additional_prompt} if additional_prompt else {}
         if stage == "metadata":
             data = dict(self.generator.generate_metadata(text, **options))
@@ -170,11 +171,12 @@ class StageHandlers:
             raise ValueError("任务缺少原始 PDF 哈希")
         try:
             draft = self._read_draft(task)
+            extracted_markdown = self.inputs.read_artifact(task.task_id, _EXTRACTED_MARKDOWN).decode("utf-8")
             source = self.inputs.artifact_path(task.task_id, task.source.copy_path)
             if not source.is_file():
                 raise FileNotFoundError(source)
         except FileNotFoundError:
-            raise ValueError("任务缺少入库所需的 PDF、元数据、分类或总结") from None
+            raise ValueError("任务缺少入库所需的 PDF、提取原文、元数据、分类或总结") from None
         except (UnicodeError, json.JSONDecodeError):
             raise ValueError("任务产物不是有效的 UTF-8 文本或 JSON") from None
 
@@ -185,6 +187,7 @@ class StageHandlers:
             source=source, sha256=task.source.sha256, original_filename=task.source.original_filename,
             metadata=draft["metadata"], classification=classification,
             summary=draft["rough_summary"], detailed_summary=draft["detailed_summary"],
+            extracted_markdown=extracted_markdown,
         )
 
     def _execute_vector(self, task: Task) -> None:

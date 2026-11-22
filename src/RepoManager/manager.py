@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.config import (
-    DETAILED_SUMMARIES_DIR, PAPERS_PATH, PDFS_DIR, REPO_STATE_PATH,
+    DETAILED_SUMMARIES_DIR, PAPERS_PATH, PDF_EXTRACTIONS_DIR, PDFS_DIR, REPO_STATE_PATH,
     TAXONOMY_PATH, VECTOR_DATA_DIR,
 )
 from src.hash_duplicate import hash_file
@@ -58,13 +58,16 @@ def _inside(root: Path, relative: str) -> Path:
 class RepoManager:
     def __init__(
         self, *, papers_path=PAPERS_PATH, taxonomy_path=TAXONOMY_PATH,
-        state_path=REPO_STATE_PATH, pdfs_dir=PDFS_DIR,
+        state_path=REPO_STATE_PATH, pdfs_dir=None, extractions_dir=None,
         summaries_dir=DETAILED_SUMMARIES_DIR, vectors_dir=VECTOR_DATA_DIR,
     ):
         self.papers_path = Path(papers_path)
         self.taxonomy_path = Path(taxonomy_path)
         self.state_path = Path(state_path)
-        self.pdfs_dir = Path(pdfs_dir)
+        self.pdfs_dir = Path(PDFS_DIR if pdfs_dir is None else pdfs_dir)
+        if extractions_dir is None:
+            extractions_dir = PDF_EXTRACTIONS_DIR if pdfs_dir is None else self.pdfs_dir / "extractions"
+        self.extractions_dir = Path(extractions_dir)
         self.summaries_dir = Path(summaries_dir)
         self.vectors_dir = Path(vectors_dir)
 
@@ -82,9 +85,13 @@ class RepoManager:
     def get_taxonomy(self) -> dict:
         return _checked(load_taxonomy, self.taxonomy_path)
 
+    def _extraction_path(self, category: str, filename: str) -> Path:
+        return _inside(self.extractions_dir, f"{category}/{Path(filename).stem}.md")
+
     def ingest_paper(
         self, source: Path, *, sha256: str, original_filename: str, metadata: dict,
         classification: dict, summary: str, detailed_summary: str,
+        extracted_markdown: str | None = None,
     ) -> str:
         """将已确认的任务草稿入库。同一 PDF 重复提交时返回已有编号。"""
         source = Path(source)
@@ -103,6 +110,10 @@ class RepoManager:
                 raise ValueError("元数据和分类必须是对象")
             if not isinstance(detailed_summary, str) or not detailed_summary.strip():
                 raise ValueError("精细总结不能为空")
+            if extracted_markdown is not None and (
+                not isinstance(extracted_markdown, str) or not extracted_markdown.strip()
+            ):
+                raise ValueError("提取原文 Markdown 不能为空")
             filename = metadata.get("filename")
             if (not isinstance(filename, str) or len(filename) > 180
                     or not _PDF_NAME.fullmatch(filename) or filename[:-4] in _WINDOWS_RESERVED):
@@ -142,8 +153,11 @@ class RepoManager:
                 raise FileExistsError("同一分类下已有同名论文")
             pdf_path = _inside(self.pdfs_dir, f"{category}/{filename}")
             summary_path = _inside(self.summaries_dir, f"{paper_id}.md")
-            if any(path.exists() or path.is_symlink() for path in (pdf_path, summary_path)):
-                raise FileExistsError("目标 PDF 或精细总结已存在")
+            markdown_files = {summary_path: detailed_summary}
+            if extracted_markdown is not None:
+                markdown_files[self._extraction_path(category, filename)] = extracted_markdown
+            if any(path.exists() or path.is_symlink() for path in (pdf_path, *markdown_files)):
+                raise FileExistsError("目标 PDF 或 Markdown 附件已存在")
 
             state["paper_id_counter"] = number
             _write_json(self.state_path, state)
@@ -151,15 +165,16 @@ class RepoManager:
             taxonomy_saved = False
             try:
                 pdf_path.parent.mkdir(parents=True, exist_ok=True)
-                summary_path.parent.mkdir(parents=True, exist_ok=True)
                 with source.open("rb") as original, pdf_path.open("xb") as output:
                     published.append(pdf_path)
                     shutil.copyfileobj(original, output)
                 if hash_file(pdf_path) != sha256:
                     raise ValueError("复制的 PDF 与任务原件哈希不符")
-                with summary_path.open("x", encoding="utf-8", newline="\n") as output:
-                    published.append(summary_path)
-                    output.write(detailed_summary)
+                for path, content in markdown_files.items():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with path.open("x", encoding="utf-8", newline="\n") as output:
+                        published.append(path)
+                        output.write(content)
                 if taxonomy != old_taxonomy:
                     _write_json(self.taxonomy_path, taxonomy)
                     taxonomy_saved = True
@@ -187,6 +202,7 @@ class RepoManager:
                 raise ValueError("PDF 被其他论文记录引用")
             files = {
                 "pdf": _inside(self.pdfs_dir, f"{category}/{filename}"),
+                "extraction": self._extraction_path(category, filename),
                 "summary": _inside(self.summaries_dir, f"{paper_id}.md"),
                 "vector": _inside(self.vectors_dir, f"{paper_id}.json"),
             }

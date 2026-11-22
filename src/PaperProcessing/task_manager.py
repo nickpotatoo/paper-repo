@@ -157,6 +157,7 @@ class TaskManager:
                 draft.source, sha256=draft.sha256, original_filename=draft.original_filename,
                 metadata=draft.metadata, classification=draft.classification,
                 summary=draft.summary, detailed_summary=draft.detailed_summary,
+                extracted_markdown=draft.extracted_markdown,
             )
             self._promote_classification_ids(self.repo.get_taxonomy())
         if result.pending_taxonomy is not None:

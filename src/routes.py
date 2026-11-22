@@ -530,6 +530,8 @@ def create_router(
 
     @router.get("/files/pdfs/{relative_path:path}")
     def pdf_file(relative_path: str) -> Response:
+        if Path(relative_path).suffix.lower() != ".pdf":
+            return _file_error(404)
         return _serve_file(PDFS_DIR, relative_path)
 
     @router.get("/files/detailed_summaries/{relative_path:path}")

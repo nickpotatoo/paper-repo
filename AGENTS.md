@@ -16,6 +16,7 @@
 | `data/taxonomy.json` | 正式分类、标签和文献类型索引 |
 | `data/repo_state.json` | 论文和索引编号计数器 |
 | `data/pdfs/<category_id>/<filename>.pdf` | 正式 PDF |
+| `data/pdfs/extractions/<category_id>/<filename>.md` | 任务入库时保存的提取原文，根目录由 `PDF_EXTRACTIONS_DIR` 配置，使用正式 PDF 的文件名主干 |
 | `data/detailed_summaries/<paper_id>.md` | 中文精细总结 |
 | `data/vectors/<paper_id>.json` | 每篇论文独立的向量文件 |
 

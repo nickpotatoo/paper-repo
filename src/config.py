@@ -30,6 +30,7 @@ PAPERS_PATH = Path(os.environ.get("PAPERS_PATH") or DATA_DIR / "papers.json")
 TAXONOMY_PATH = DATA_DIR / "taxonomy.json"
 REPO_STATE_PATH = DATA_DIR / "repo_state.json"
 PDFS_DIR = DATA_DIR / "pdfs"
+PDF_EXTRACTIONS_DIR = PDFS_DIR / "extractions"  # 入库后的 PDF 提取原文 Markdown。
 DETAILED_SUMMARIES_DIR = Path(
     os.environ.get("DETAILED_SUMMARIES_DIR") or DATA_DIR / "detailed_summaries"
 )

@@ -72,6 +72,7 @@ class IngestDraft:
     classification: dict
     summary: str
     detailed_summary: str
+    extracted_markdown: str
 
 
 @dataclass
