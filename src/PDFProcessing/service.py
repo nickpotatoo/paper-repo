@@ -1,5 +1,6 @@
 """PDF 能力入口；不处理摘要生成、分类、编号、入库或向量。"""
 
+from src import config
 from src.hash_duplicate import hash_file
 
 from .backends.docling_backend import DoclingBackend
@@ -17,7 +18,9 @@ class PdfProcessingService:
         inspector: PdfInspector | None = None, renderer: PdfRenderer | None = None,
     ):
         basic = PyMuPDFBackend()
-        self._extractor = extractor if extractor is not None else DoclingBackend()
+        if extractor is None:
+            extractor = DoclingBackend() if config.ENABLE_DOCLING_MODEL else basic
+        self._extractor = extractor
         self._inspector = inspector if inspector is not None else basic
         self._renderer = renderer if renderer is not None else basic
 

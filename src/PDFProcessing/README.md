@@ -7,7 +7,7 @@
 ```text
 PdfProcessingService
   ├─ PdfInspector → PyMuPDFBackend
-  ├─ PdfExtractor → DoclingBackend
+  ├─ PdfExtractor → PyMuPDFBackend 或 DoclingBackend
   ├─ PdfRenderer  → PyMuPDFBackend
   ├─ assess_extraction → QualityReport
   └─ export_markdown  → str
@@ -19,7 +19,7 @@ PdfProcessingService
 | `interfaces.py` | 可替换的检查、解析、渲染 Protocol |
 | `service.py` | 检查本地源文件、校验已提供的 SHA-256、能力转发及质量报告合并 |
 | `backends/docling_backend.py` | Docling → 自有模型的转换，其他模块不接触第三方对象 |
-| `backends/pymupdf_backend.py` | 文件内 metadata、页面文本层检查、整页/区域 PNG 渲染 |
+| `backends/pymupdf_backend.py` | 文件内 metadata、文本层提取、整页/区域 PNG 渲染 |
 | `quality.py` | 无内容、缺少位置、乱码替换字符、未识别表格/公式等启发式报告 |
 | `markdown.py` | 导出提取原文；保留来源注释、LaTeX、表格跨度与代码块 |
 | `tests/` | 独立单元测试及临时 PDF 集成测试 |
@@ -37,6 +37,8 @@ python -m pip install -r requirements.txt
 Docling 和 PyMuPDF 按已安装的项目依赖使用，不检查模块是否存在、不捕获缺少依赖的导入错误，也不自动跳过测试。PyMuPDF 直接导入；Docling 在创建实际转换器时普通导入，避免创建 service 就加载解析器。也可注入符合 Protocol 的替代后端，不会静默切换解析器。
 
 Docling 模型统一保存在 `data/models/docling/`，由 `src/config.py` 的 `DOCLING_MODELS_DIR` 配置，可用同名环境变量覆盖。创建实际转换器时，先通过 Docling 的下载接口将布局及已启用的表格、OCR、公式模型下载到该目录，再通过 pipeline 的 `artifacts_path` 从同一目录加载。重复使用时由下载接口复用已有模型；关闭的功能不主动下载对应模型。OCR 显式使用 RapidOCR，确保下载和加载路径一致。
+
+默认使用 PyMuPDF 提取已有文本层。需要 OCR 或表格结构恢复时，可用 `python launch.py -d` 启用 Docling 模型，也可设置 `ENABLE_DOCLING_MODEL=1`。无模型模式遇到扫描页时会记录对应页码和 OCR 提示。
 
 模型目录已排除出 Git；旧用户目录中的缓存不自动搬迁或删除，新目录缺少模型时按需下载。初始化 service 本身不下载模型，实际提取时才准备模型。适配器关闭远程服务，输入只接受本地 PDF；模型下载不会将论文上传到模型托管服务。
 

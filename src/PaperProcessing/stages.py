@@ -108,7 +108,9 @@ class StageHandlers:
         info = self.extractor.inspect_pdf(pdf)
         result = self.extractor.extract_document(pdf, ExtractOptions())
         if result.status != "success" or result.document is None or any(i.severity == "error" for i in result.issues):
-            raise ValueError("PDF 提取失败或不完整，需要人工处理")
+            issues = [issue.message for issue in result.issues if issue.severity == "error"]
+            detail = "；".join(issues[:3]) or f"{result.backend} 返回 {result.status}"
+            raise ValueError(f"PDF 提取失败或不完整：{detail}")
         text = self.extractor.export_markdown(result.document)
         if not text.strip():
             raise ValueError("PDF 提取文本为空")

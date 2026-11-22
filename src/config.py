@@ -36,6 +36,7 @@ DETAILED_SUMMARIES_DIR = Path(
 VIEWER_DIR = ROOT
 
 # PDF 解析模型：首次提取按功能下载并从此处加载，不使用用户目录作为模型存储位置。
+ENABLE_DOCLING_MODEL = os.environ.get("ENABLE_DOCLING_MODEL", "0") == "1"
 DOCLING_MODELS_DIR = Path(os.environ.get("DOCLING_MODELS_DIR") or DATA_DIR / "models" / "docling")
 
 # ── HTTP 服务与应用默认行为 ────────────────────────────────────
