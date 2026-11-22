@@ -57,11 +57,12 @@ function renderJson(value, depth = 0) {
 }
 
 function renderTask(task, expanded, generating, retrying) {
-  const currentStage = task.current_stage;
+  const currentStage = Object.hasOwn(stages, task.current_stage) ? task.current_stage : null;
   const vectorStatus = generating ? 'running' : task.stages?.[currentStage]?.status;
   const taskStatus = generating || retrying ? 'running' : task.status;
-  const canRetry = canAct(task, 'retry');
+  const canRetry = currentStage !== null && canAct(task, 'retry');
   const stageRecords = Object.entries(task.stages ?? {}).filter(([id, stage]) =>
+    Object.hasOwn(stages, id) &&
     (id !== 'vectorize' || task.paper_id) &&
     (id !== 'finished' || id === currentStage) &&
     (id !== 'ingest' || stage?.status !== 'pending' || id === currentStage) &&
