@@ -57,6 +57,8 @@ HTTP_RESPONSE_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 SERVICE_PASSWORD = os.environ.get("SERVICE_PASSWORD", "")
+ICP_RECORD_NUMBER = os.environ.get("ICP_RECORD_NUMBER", "").strip()
+PUBLIC_SECURITY_RECORD_NUMBER = os.environ.get("PUBLIC_SECURITY_RECORD_NUMBER", "").strip()
 
 # ── 语义检索请求限制 ────────────────────────────────────────────
 SEARCH_MAX_REQUEST_BYTES = 32768    # JSON 请求正文上限，单位为字节。

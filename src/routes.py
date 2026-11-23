@@ -30,6 +30,7 @@ from src.config import (
     IDLE_TIMEOUT_SECONDS, IDLE_CHECK_INTERVAL_SECONDS,
     VALIDATE_REQUEST_DATA, AUTO_SHUTDOWN, APP_TITLE,
     SERVICE_PASSWORD, NEW_PAPERS_DIR, TASKS_DIR, UPLOAD_MAX_BYTES,
+    ICP_RECORD_NUMBER, PUBLIC_SECURITY_RECORD_NUMBER,
     REGENERATION_MAX_PROMPT_CHARS, REGENERATION_MAX_REQUEST_BYTES,
 )
 from src.PaperProcessing import REGENERATION_ACTIONS, TaskAction, TaskManager
@@ -518,7 +519,33 @@ def create_router(
     @router.get("/")
     @router.get("/paper_viewer.html")
     def viewer() -> Response:
-        return _serve_file(viewer_dir, "paper_viewer.html")
+        page = inside(viewer_dir, "paper_viewer.html")
+        try:
+            if page is None or not page.is_file():
+                return _file_error(404)
+            template = page.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return _file_error(404)
+        except (OSError, UnicodeError):
+            return _file_error(500)
+
+        links = []
+        if ICP_RECORD_NUMBER:
+            links.append(
+                '<a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">'
+                f'{escape(ICP_RECORD_NUMBER)}</a>'
+            )
+        if PUBLIC_SECURITY_RECORD_NUMBER:
+            links.append(
+                '<a href="https://beian.mps.gov.cn/" target="_blank" rel="noopener noreferrer">'
+                '<img src="https://beian.mps.gov.cn/web/assets/logo01.6189a29f.png" alt="">'
+                f'{escape(PUBLIC_SECURITY_RECORD_NUMBER)}</a>'
+            )
+        footer = '<footer class="site-footer">' + "\n".join(links) + "</footer>" if links else ""
+        return Response(
+            template.replace("<!-- SITE_FILING_FOOTER -->", footer, 1),
+            media_type="text/html", headers=HTTP_RESPONSE_HEADERS,
+        )
 
     @router.get("/vendor/{relative_path:path}")
     def vendor_file(relative_path: str) -> Response:
