@@ -11,7 +11,7 @@ python -m pip install -r requirements.txt
 python launch.py
 ```
 
-默认打开 `http://127.0.0.1:5000/`。用 `--no-open-viewer` 可只启动服务，用 `--port` 可指定端口。空库首次启动会初始化数据文件；已有资料但缺少索引文件时，请先恢复对应文件。
+默认打开 `http://127.0.0.1:5000/`。用 `--without-open-viewer` 可只启动服务，用 `--port` 可指定端口。空库首次启动会初始化数据文件；已有资料但缺少索引文件时，请先恢复对应文件。
 
 配置集中在 [src/config.py](src/config.py)。可参考 [.env.example](.env.example) 创建根目录的 `.env`：
 
