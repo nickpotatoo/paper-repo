@@ -15,7 +15,12 @@ class Paper:
 
 _papers_template = []
 _taxonomy_template = {"category_index": {}, "tag_index": {}, "document_type_index": {}}
-_repo_state_template = {"paper_id_counter": 0}
+_repo_state_template = {
+    "paper_id_counter": 0,
+    "taxonomy_id_counters": {"C": 0, "T": 0, "D": 0},
+}
+
+# 以下单条记录模板仅展示字段结构，空值需替换为实际内容后才能保存。
 _paper_template = {
     "paper_id": "",
     "added_at": "",
