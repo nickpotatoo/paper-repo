@@ -7,7 +7,7 @@ from os import PathLike
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from src.config import DATA_DIR, PAPERS_PATH, TAXONOMY_PATH, REPO_STATE_PATH, PDFS_DIR, DETAILED_SUMMARIES_DIR, VECTOR_DATA_DIR
+from src.config import DATA_DIR, PAPERS_PATH, TAXONOMY_PATH, REPO_STATE_PATH, PDFS_DIR, DETAILED_SUMMARIES_DIR, VECTOR_DATA_DIR, PDF_EXTRACTIONS_DIR
 from src.template import _papers_template, _taxonomy_template, _repo_state_template
 
 __all__ = ["init_data", "load_papers", "load_taxonomy", "load_state", "validate_data", "load_data"]
@@ -24,12 +24,12 @@ def init_data() -> None:
     existing = [path.exists() for path, _ in sources]
     if any(existing) and not all(existing):
         missing = ", ".join(str(path) for (path, _), exists in zip(sources, existing) if not exists)
-        raise ValueError(f"repo 数据文件不完整，缺少：{missing}")
-    directories = tuple(Path(path) for path in (DATA_DIR, PDFS_DIR, DETAILED_SUMMARIES_DIR, VECTOR_DATA_DIR))
+        raise ValueError(f"repo 数据文件不完整，缺少：{missing}, 若需初始化请先删除已有文件或补上缺失的文件")
+    directories = tuple(Path(path) for path in (DATA_DIR, PDFS_DIR, DETAILED_SUMMARIES_DIR, VECTOR_DATA_DIR, PDF_EXTRACTIONS_DIR))
     if not any(existing):
         for directory in directories:
             if directory.exists() and not directory.is_dir():
-                raise ValueError(f"资料目录不是文件夹：{directory}")
+                raise ValueError(f"资料目录不是文件夹：{directory}, 请先删除或改名")
             if directory.exists() and any(
                 path.is_file()
                 for path in directory.rglob("*")

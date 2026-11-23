@@ -18,13 +18,7 @@
 
 # 明确排除的资料与本地配置（优先于上方白名单）
 *.[pP][dD][fF]
-/data/detailed_summaries/*
-!/data/detailed_summaries/README.md
-/data/papers.json
-/data/taxonomy.json
-/data/repo_state.json
-/data/vectors/
-/data/models/
+/data/*
 .deleted_papers/
 /src/test/
 /viewer/tests/
